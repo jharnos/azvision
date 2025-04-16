@@ -1,4 +1,4 @@
-# 🍹 AZVision: Computer Vision Application for Beverage Quality Control
+# 🌵 AZVision: Computer Vision Application for Beverage Quality Control
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/your-username/visionflow/ci.yml?branch=main)](https://github.com/your-username/visionflow/actions)
 [![License](https://img.shields.io/github/license/your-username/visionflow)](LICENSE)
