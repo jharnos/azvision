@@ -12,8 +12,12 @@ from collections import deque
 from queue import Queue, Empty
 
 # === Utility functions ===
-def simplify_contour(contour, tolerance=2.0):
-    epsilon = tolerance * cv2.arcLength(contour, True) / 100.0
+def simplify_contour(contour, tolerance=0.1):
+    """
+    Simplify contour while preserving maximum detail
+    tolerance: much lower value for very high detail
+    """
+    epsilon = tolerance * cv2.arcLength(contour, True) / 200.0  # Doubled precision (was 100.0)
     return cv2.approxPolyDP(contour, epsilon, True)
 
 def get_latest_image(directory):
@@ -55,69 +59,73 @@ def build_camera_index_map():
     return camera_map
 
 def color_based_edge_detection(image, target_color, tolerance_h=30, tolerance_s=50, tolerance_v=50):
-    """
-    image: BGR image from OpenCV
-    target_color: tuple of (B,G,R) values
-    tolerance_h: Hue tolerance (0-180)
-    tolerance_s: Saturation tolerance (0-255)
-    tolerance_v: Value tolerance (0-255)
-    """
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     target_hsv = cv2.cvtColor(np.uint8([[target_color]]), cv2.COLOR_BGR2HSV)[0][0]
     
-    # Convert to int to prevent overflow
     h, s, v = int(target_hsv[0]), int(target_hsv[1]), int(target_hsv[2])
     
-    # Handle Hue wrapping (since it's circular: 0-180)
     lower_h = max(0, (h - tolerance_h) % 180)
     upper_h = min(180, (h + tolerance_h) % 180)
     
-    # Handle Saturation and Value (0-255)
     lower_s = max(0, s - tolerance_s)
     upper_s = min(255, s + tolerance_s)
     lower_v = max(0, v - tolerance_v)
     upper_v = min(255, v + tolerance_v)
     
-    # Create the bounds arrays
     lower_bound = np.array([lower_h, lower_s, lower_v], dtype=np.uint8)
     upper_bound = np.array([upper_h, upper_s, upper_v], dtype=np.uint8)
     
-    # Create the mask
     mask = cv2.inRange(hsv_image, lower_bound, upper_bound)
     
-    # Apply morphological operations
-    kernel = np.ones((3,3), np.uint8)
+    # More aggressive morphological operations
+    kernel = np.ones((5,5), np.uint8)  # Larger kernel
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.dilate(mask, kernel, iterations=1)  # Add dilation
+    
+    # Ensure mask is binary
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
     
     # Get edges from the mask
     edges = cv2.Canny(mask, 50, 150)
+    
+    # Thicken the edges
+    edges = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
     
     return edges, mask
 
 class CNCVisionApp:
     def __init__(self, master):
         self.master = master
-        master.title("CNC Vision Pro Smooth Preview")
+        master.title("AriZona Vision")
+        
+        # Define color scheme
+        self.colors = {
+            'main': "#81d2c8",      # Main background
+            'secondary': "#abe3d6",  # Secondary elements
+            'accent1': "#e3c46e",    # Warm gold
+            'accent2': "#e34f78",    # Rose
+            'text': "#333333"        # Dark gray for text
+        }
+        
+        # Set the background color for the main window
+        master.configure(bg=self.colors['main'])
         
         # Create a main frame to hold everything
-        main_frame = tk.Frame(master)
+        main_frame = tk.Frame(master, bg=self.colors['main'])
         main_frame.grid(row=0, column=0, sticky="nsew")
         
-        # Configure grid weights for main window
+        # Configure grid weights
         master.grid_rowconfigure(0, weight=1)
         master.grid_columnconfigure(0, weight=1)
-        
-        # Configure grid weights for main frame
         main_frame.grid_rowconfigure(0, weight=1)
         main_frame.grid_columnconfigure(0, weight=1)
 
-        # Create canvas and scrollbar
-        self.main_canvas = tk.Canvas(main_frame)
+        # Create canvas and scrollbar with the color scheme
+        self.main_canvas = tk.Canvas(main_frame, bg=self.colors['main'])
         self.scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=self.main_canvas.yview)
         
         # Create the scrollable frame
-        self.scrollable_frame = tk.Frame(self.main_canvas)
+        self.scrollable_frame = tk.Frame(self.main_canvas, bg=self.colors['main'])
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
@@ -171,7 +179,7 @@ class CNCVisionApp:
         self.selected_camera.set(self.available_cameras[0])
 
         # === Layout: Previews at the top ===
-        self.preview_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE)
+        self.preview_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE, bg=self.colors['secondary'])
         self.preview_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         self.preview_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -185,22 +193,22 @@ class CNCVisionApp:
         self.preview_label_mask.grid(row=0, column=2, padx=2, pady=2, sticky="nsew")
 
         # === Settings below the preview ===
-        settings_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE)
+        settings_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE, bg=self.colors['secondary'])
         settings_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         settings_frame.grid_columnconfigure((0,1), weight=1)
 
         # Create left and right columns
-        left_column = tk.Frame(settings_frame)
+        left_column = tk.Frame(settings_frame, bg=self.colors['main'])
         left_column.grid(row=0, column=0, sticky="nsew", padx=2)
         left_column.grid_columnconfigure(0, weight=1)
         
-        right_column = tk.Frame(settings_frame)
+        right_column = tk.Frame(settings_frame, bg=self.colors['main'])
         right_column.grid(row=0, column=1, sticky="nsew", padx=2)
         right_column.grid_columnconfigure(0, weight=1)
 
         # === Left Column (Canny Edge Settings) ===
         # Basic settings
-        basic_settings = tk.LabelFrame(left_column, text="Basic Settings")
+        basic_settings = tk.LabelFrame(left_column, text="Basic Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         basic_settings.grid(row=0, column=0, sticky="ew", pady=2)
         basic_settings.grid_columnconfigure(0, weight=1)
         
@@ -208,7 +216,7 @@ class CNCVisionApp:
         tk.Entry(basic_settings, textvariable=self.inches_per_pixel).grid(row=1, column=0, sticky="ew")
 
         # Camera settings
-        camera_settings = tk.LabelFrame(left_column, text="Camera Settings")
+        camera_settings = tk.LabelFrame(left_column, text="Camera Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         camera_settings.grid(row=1, column=0, sticky="ew", pady=2)
         camera_settings.grid_columnconfigure(0, weight=1)
         
@@ -226,8 +234,13 @@ class CNCVisionApp:
         self.resolution_label = tk.Label(camera_settings, text="Capture resolution: 1920 x 1080")
         self.resolution_label.grid(row=4, column=0, sticky="w")
 
+        # Check resolution button
+        check_res_button = tk.Button(camera_settings, text="Check Available Resolutions",
+                                   command=lambda: self.check_current_camera_resolutions())
+        check_res_button.grid(row=5, column=0, sticky="ew", pady=2)
+
         # Canny Edge settings
-        canny_frame = tk.LabelFrame(left_column, text="Canny Edge Detection")
+        canny_frame = tk.LabelFrame(left_column, text="Canny Edge Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         canny_frame.grid(row=2, column=0, sticky="ew", pady=2)
         canny_frame.grid_columnconfigure(0, weight=1)
         
@@ -242,7 +255,7 @@ class CNCVisionApp:
                  command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
 
         # === Right Column (Color Detection) ===
-        color_frame = tk.LabelFrame(right_column, text="Color Detection")
+        color_frame = tk.LabelFrame(right_column, text="Color Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         color_frame.grid(row=0, column=0, sticky="ew", pady=2)
         color_frame.grid_columnconfigure(0, weight=1)
         
@@ -270,7 +283,7 @@ class CNCVisionApp:
                   command=self.pick_color).grid(row=0, column=3)
 
         # Color tolerance controls
-        tolerance_frame = tk.LabelFrame(color_frame, text="Color Tolerance")
+        tolerance_frame = tk.LabelFrame(color_frame, text="Color Tolerance", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         tolerance_frame.grid(row=1, column=0, sticky="ew", pady=2)
         tolerance_frame.grid_columnconfigure(0, weight=1)
         
@@ -290,19 +303,19 @@ class CNCVisionApp:
                  command=lambda _: self.refresh_preview()).grid(row=5, column=0, sticky="ew")
 
         # === Control Buttons at the bottom ===
-        button_frame = tk.Frame(self.scrollable_frame)
+        button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
         button_frame.grid(row=2, column=0, sticky="ew", pady=2)
         button_frame.grid_columnconfigure((0,1,2), weight=1)
         
         tk.Button(button_frame, text="Capture Latest Image",
-                  command=self.capture_image).grid(row=0, column=0, padx=2, sticky="ew")
+                  command=self.capture_image, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=0, padx=2, sticky="ew")
         tk.Button(button_frame, text="Auto-Load Latest Capture",
-                  command=self.load_latest_capture).grid(row=0, column=1, padx=2, sticky="ew")
+                  command=self.load_latest_capture, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=1, padx=2, sticky="ew")
         tk.Button(button_frame, text="Generate Simplified DXF",
-                  command=self.process_image).grid(row=0, column=2, padx=2, sticky="ew")
+                  command=self.process_image, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
 
         # Status label
-        self.status_label = tk.Label(self.scrollable_frame, text="", fg="blue")
+        self.status_label = tk.Label(self.scrollable_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
         self.status_label.grid(row=3, column=0, pady=2)
 
         # Add mousewheel scrolling
@@ -336,7 +349,9 @@ class CNCVisionApp:
         self.open_live_preview()
 
     def change_camera(self, selection):
+        """Modified camera change function"""
         self.selected_camera.set(selection)
+        # Open preview with new camera without checking resolutions
         self.open_live_preview()
 
     def open_live_preview(self):
@@ -409,43 +424,49 @@ class CNCVisionApp:
             # Resize frame
             frame_resized = cv2.resize(frame, (preview_width, preview_height))
 
+            # Initialize edges and mask_blend
+            edges = None
+            mask_blend = None
+
             if self.color_mode.get() and self.target_color is not None:
-                edges, mask = color_based_edge_detection(
+                # Get both mask and edges from color detection
+                mask, edges = color_based_edge_detection(
                     frame_resized, 
                     self.target_color,
                     tolerance_h=self.color_tolerance_h.get(),
                     tolerance_s=self.color_tolerance_s.get(),
                     tolerance_v=self.color_tolerance_v.get()
                 )
-                self.last_mask = mask
                 
                 # Create a colored visualization of the mask
                 mask_colored = np.zeros_like(frame_resized)
-                mask_colored[mask > 0] = [0, 255, 0]
+                mask_colored[mask > 0] = [0, 255, 0]  # Green for detected areas
                 
-                # Blend with original image for better visualization
-                alpha = 0.7
-                mask_blend = cv2.addWeighted(frame_resized, 1.0, mask_colored, 0.5, 0)
+                # Blend with original image
+                mask_blend = cv2.addWeighted(frame_resized, 0.7, mask_colored, 0.3, 0)
                 
-                # Create proper overlay for detected areas
-                green_overlay = np.zeros_like(frame_resized)
-                green_overlay[:, :] = [0, 255, 0]
-                
-                mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-                mask_blend = np.where(mask_3ch > 0,
-                                    cv2.addWeighted(mask_blend, 0.7, green_overlay, 0.3, 0),
-                                    mask_blend)
             else:
+                # Standard edge detection
                 gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
                 blurred = cv2.GaussianBlur(gray, (5, 5), 0)
                 edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
-                self.last_mask = None
-                mask_blend = np.zeros_like(frame_resized)
+                mask_blend = np.zeros_like(frame_resized)  # Empty mask display for non-color mode
 
-            # Update the GUI directly since we're in the main thread
-            self.update_gui_from_main_thread(frame_resized, edges, mask_blend)
+            # Ensure edges exists
+            if edges is None:
+                edges = np.zeros((preview_height, preview_width), dtype=np.uint8)
+
+            # Convert edges to RGB for display
+            edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
+
+            # Update the GUI with all three images
+            self.update_gui_from_main_thread(frame_resized, edges_rgb, mask_blend)
+
         except Exception as e:
             print(f"Error in _get_dimensions_and_process: {e}")
+            # Create blank images in case of error
+            blank = np.zeros((preview_height, preview_width, 3), dtype=np.uint8)
+            self.update_gui_from_main_thread(frame_resized, blank, blank)
 
     def check_queue(self):
         """Check for pending GUI updates"""
@@ -463,26 +484,45 @@ class CNCVisionApp:
     def update_gui_from_main_thread(self, frame, edges, mask):
         """Update GUI elements from the main thread"""
         try:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Handle frame
+            if len(frame.shape) == 2:  # If grayscale
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+            else:  # If already RGB/BGR
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_original = Image.fromarray(frame_rgb)
             imgtk_original = ImageTk.PhotoImage(image=img_original)
             
-            edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
+            # Handle edges
+            if len(edges.shape) == 2:  # If grayscale
+                edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
+            else:  # If already RGB/BGR
+                edges_rgb = edges  # Already in RGB format
             img_edges = Image.fromarray(edges_rgb)
             imgtk_edges = ImageTk.PhotoImage(image=img_edges)
             
-            mask_rgb = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
+            # Handle mask
+            if len(mask.shape) == 2:  # If grayscale
+                mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+            else:  # If already RGB/BGR
+                mask_rgb = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
             img_mask = Image.fromarray(mask_rgb)
             imgtk_mask = ImageTk.PhotoImage(image=img_mask)
             
+            # Update the labels
             self.preview_label_original.imgtk = imgtk_original
             self.preview_label_original.configure(image=imgtk_original)
             self.preview_label_edges.imgtk = imgtk_edges
             self.preview_label_edges.configure(image=imgtk_edges)
             self.preview_label_mask.imgtk = imgtk_mask
             self.preview_label_mask.configure(image=imgtk_mask)
+            
         except Exception as e:
             print(f"Error in update_gui_from_main_thread: {e}")
+            # Create blank images in case of error
+            blank = np.zeros((100, 100, 3), dtype=np.uint8)
+            self.preview_label_original.configure(image='')
+            self.preview_label_edges.configure(image='')
+            self.preview_label_mask.configure(image='')
 
     def refresh_preview(self):
         if self.frame_buffer:
@@ -530,22 +570,43 @@ class CNCVisionApp:
             if frame is None:
                 raise Exception("Failed to read captured image")
             
+            # Initialize edges variable
+            edges = None
+            
             if self.color_mode.get() and self.target_color is not None:
-                edges, _ = color_based_edge_detection(
+                # Get both edges and mask from color detection
+                edges, mask = color_based_edge_detection(
                     frame,
                     self.target_color,
                     tolerance_h=self.color_tolerance_h.get(),
                     tolerance_s=self.color_tolerance_s.get(),
                     tolerance_v=self.color_tolerance_v.get()
                 )
+                
+                # Ensure we have thick, clear edges for DXF generation
+                kernel = np.ones((3,3), np.uint8)
+                mask = cv2.dilate(mask, kernel, iterations=2)
+                
+                # Use the mask for edge detection
+                edges = cv2.Canny(mask, 50, 150)
+                
             else:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 blurred = cv2.GaussianBlur(gray, (5, 5), 0)
                 edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
 
-            thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)[1]
+            # Ensure we have edges
+            if edges is None:
+                raise Exception("Failed to generate edges from capture")
 
-            cv2.imwrite(edges_path, thresh)
+            # Save both the original edges and a thresholded version
+            cv2.imwrite(edges_path, edges)
+            
+            # Save a debug image to see what we're working with
+            debug_path = os.path.join(self.capture_directory, f"capture_{timestamp}_debug.jpg")
+            if self.color_mode.get():
+                cv2.imwrite(debug_path, mask)
+
             self.image_path = edges_path
             self.edge_image = edges_path
 
@@ -553,6 +614,7 @@ class CNCVisionApp:
 
         except Exception as e:
             messagebox.showerror("Capture Error", str(e))
+            print(f"Capture error: {str(e)}")  # Add debug print
         finally:
             self.open_live_preview()
 
@@ -576,43 +638,100 @@ class CNCVisionApp:
 
         try:
             image = cv2.imread(self.image_path)
+            print(f"Original image shape: {image.shape}")
             
             if self.color_mode.get() and self.target_color is not None:
-                edges, mask = color_based_edge_detection(
-                    image,
-                    self.target_color,
-                    tolerance_h=self.color_tolerance_h.get(),
-                    tolerance_s=self.color_tolerance_s.get(),
-                    tolerance_v=self.color_tolerance_v.get()
-                )
-                thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)[1]
+                edges = cv2.imread(self.image_path, cv2.IMREAD_GRAYSCALE)
+                
+                # Minimal morphological operations to preserve detail
+                kernel_close = np.ones((2,2), np.uint8)  # Smaller kernel
+                edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_close)
+                
+                # Very light dilation
+                kernel_dilate = np.ones((2,2), np.uint8)
+                edges = cv2.dilate(edges, kernel_dilate, iterations=1)
+                
+                _, thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)
+                
             else:
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                 _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-            cv2.imwrite("dxf_edges_debug.png", thresh)
+            # Use CHAIN_APPROX_NONE for maximum points
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            print(f"Initial contours found: {len(contours)}")
 
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            print(f"Contours found: {len(contours)}")
+            debug_img = np.zeros_like(image)
+            cv2.drawContours(debug_img, contours, -1, (0,255,0), 1)
+            cv2.imwrite("contours_debug.png", debug_img)
 
             doc = ezdxf.new()
             msp = doc.modelspace()
 
-            for contour in contours:
-                print(f"Contour length: {len(contour)}")
-                # if len(contour) < 5: continue  # Try commenting this out
-                simplified = simplify_contour(contour)
+            valid_contours = 0
+            for i, contour in enumerate(contours):
+                # Reduced minimum area threshold
+                area = cv2.contourArea(contour)
+                if area < 2:  # Even smaller minimum area (was 3)
+                    continue
+                
+                # Much more detailed tolerance based on contour size
+                if area > 1000:
+                    tolerance = 0.05  # Ultra-high detail for large contours
+                elif area > 500:
+                    tolerance = 0.08
+                elif area > 100:
+                    tolerance = 0.1
+                elif area > 50:
+                    tolerance = 0.15
+                else:
+                    tolerance = 0.2  # Still very detailed for small contours
+                
+                # Get initial simplified contour
+                simplified = simplify_contour(contour, tolerance=tolerance)
+                
+                # Convert to points
                 points = [(pt[0][0] * inches_per_pixel, pt[0][1] * inches_per_pixel) for pt in simplified]
-                print(f"DXF points: {points}")
-                msp.add_lwpolyline(points, close=True)
+                
+                # Add interpolated points for smoother curves
+                if len(points) > 2:
+                    # Create final point list with interpolation for smoother curves
+                    final_points = []
+                    for i in range(len(points)):
+                        current_point = points[i]
+                        final_points.append(current_point)
+                        
+                        # Add interpolated points between vertices
+                        if i < len(points) - 1:
+                            next_point = points[(i + 1) % len(points)]
+                            # Add multiple interpolated points between vertices
+                            for t in range(1, 4):  # Add 3 points between vertices
+                                t = t / 4.0
+                                interpolated_x = current_point[0] * (1 - t) + next_point[0] * t
+                                interpolated_y = current_point[1] * (1 - t) + next_point[1] * t
+                                final_points.append((interpolated_x, interpolated_y))
+                    
+                    try:
+                        # Add the highly detailed polyline
+                        msp.add_lwpolyline(final_points, close=True)
+                        valid_contours += 1
+                        print(f"Added polyline {valid_contours}")
+                        print(f"Original points: {len(contour)}")
+                        print(f"Simplified points: {len(points)}")
+                        print(f"Final points with interpolation: {len(final_points)}")
+                    except Exception as e:
+                        print(f"Failed to add polyline: {e}")
+
+            print(f"Valid contours processed: {valid_contours}")
 
             output_path = filedialog.asksaveasfilename(defaultextension=".dxf", filetypes=[("DXF files", "*.dxf")])
             if output_path:
                 doc.saveas(output_path)
                 messagebox.showinfo("Success", f"DXF saved to: {output_path}")
-                self.status_label.config(text="DXF export complete.")
+                self.status_label.config(text=f"DXF export complete. {valid_contours} contours processed.")
 
         except Exception as e:
+            print(f"Error in process_image: {str(e)}")
             messagebox.showerror("Processing Error", str(e))
 
     def pick_color(self):
@@ -745,6 +864,105 @@ class CNCVisionApp:
         if self.cap:
             self.cap.release()
         self.master.destroy()
+
+    def get_camera_resolutions(self, camera_index):
+        """Check available resolutions for the selected camera"""
+        try:
+            # Common resolutions to test
+            test_resolutions = [
+                (640, 480),    # VGA
+                (800, 600),    # SVGA
+                (1024, 768),   # XGA
+                (1280, 720),   # HD
+                (1280, 1024),  # SXGA
+                (1920, 1080),  # Full HD
+                (2560, 1440),  # QHD
+                (3840, 2160)   # 4K
+            ]
+            
+            supported_resolutions = []
+            cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+            
+            if not cap.isOpened():
+                print(f"Failed to open camera {camera_index}")
+                return []
+
+            for width, height in test_resolutions:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                
+                # Read actual values
+                actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                
+                # If we got a valid resolution and it's not already in our list
+                if actual_width > 0 and actual_height > 0:
+                    resolution = (actual_width, actual_height)
+                    if resolution not in supported_resolutions:
+                        supported_resolutions.append(resolution)
+                        print(f"Supported resolution: {actual_width}x{actual_height}")
+
+            cap.release()
+            return supported_resolutions
+
+        except Exception as e:
+            print(f"Error checking resolutions: {e}")
+            return []
+
+    def update_resolution_menu(self, resolutions):
+        """Update the resolution menu with the given resolutions"""
+        if resolutions:
+            menu = self.resolution_menu["menu"]
+            menu.delete(0, "end")
+            
+            # Sort resolutions by total pixels (ascending)
+            resolutions.sort(key=lambda x: x[0] * x[1])
+            
+            # Update resolution options
+            resolution_strings = [f"{w}x{h}" for w, h in resolutions]
+            for resolution in resolution_strings:
+                menu.add_command(label=resolution,
+                               command=lambda r=resolution: self.selected_resolution.set(r))
+            
+            # Set to highest available resolution by default
+            self.selected_resolution.set(resolution_strings[-1])
+            
+            print(f"Available resolutions:")
+            for res in resolution_strings:
+                print(f"  {res}")
+
+    def check_current_camera_resolutions(self):
+        """Manual resolution check for current camera"""
+        selection = self.selected_camera.get()
+        target_index = None
+        
+        for index, name in self.camera_index_map.items():
+            if name == selection:
+                target_index = index
+                break
+        
+        if target_index is not None:
+            # Close the current preview before checking resolutions
+            self.close_preview()
+            
+            self.status_label.config(text="Checking available resolutions...")
+            self.master.update()  # Update UI
+            
+            resolutions = self.get_camera_resolutions(target_index)
+            self.update_resolution_menu(resolutions)
+            
+            if resolutions:
+                res_text = "Available resolutions:\n" + "\n".join(f"{w}x{h}" for w, h in resolutions)
+                messagebox.showinfo("Camera Resolutions", res_text)
+            else:
+                messagebox.showwarning("Camera Resolutions", "Could not determine available resolutions")
+            
+            self.status_label.config(text="Resolution check complete")
+            
+            # Restart the live preview
+            self.open_live_preview()
+        else:
+            messagebox.showerror("Error", "No camera selected")
 
 # === Run the app ===
 if __name__ == "__main__":
