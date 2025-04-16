@@ -1,11 +1,11 @@
 # 🌵 AZVision: Computer Vision Application for Beverage Quality Control
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/jharnos/azvision/ci.yml?branch=main)](https://github.com/jharnos/azvision/actions)
-[![License](https://img.shields.io/github/license/jharnos/azvision/visionflow)](LICENSE)
+[![License](https://img.shields.io/github/license/jharnos/azvision)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![Model](https://img.shields.io/badge/model-YOLOv8-brightgreen)](https://github.com/ultralytics/ultralytics)
-[![Issues](https://img.shields.io/github/issues/jharnos/azvision/)](https://github.com/jharnos/azvision/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/jharnos/azvision/)](https://github.com/jharnos/azvision/commits/main)
+[![Issues](https://img.shields.io/github/issues/jharnos/azvision)](https://github.com/jharnos/azvision/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/jharnos/azvision)](https://github.com/jharnos/azvision/commits/main)
 [![Made With Love](https://img.shields.io/badge/Made%20with-%F0%9F%92%96-red.svg)](#)
 
 Welcome to **VisionFlow**, a powerful computer vision system designed for internal use at a leading (but anonymous 👀) beverage company. VisionFlow ensures consistent quality, detects visual anomalies in production, and assists with inventory monitoring — all with the magic of machine learning and real-time video processing.
