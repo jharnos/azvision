@@ -9,6 +9,7 @@ import time
 import subprocess
 import threading
 from collections import deque
+from queue import Queue
 
 # === Utility functions ===
 def simplify_contour(contour, tolerance=2.0):
@@ -53,12 +54,72 @@ def build_camera_index_map():
         camera_map[idx] = name
     return camera_map
 
+def color_based_edge_detection(image, target_color, tolerance_h=30, tolerance_s=50, tolerance_v=50):
+    """
+    image: BGR image from OpenCV
+    target_color: tuple of (B,G,R) values
+    tolerance_h: Hue tolerance (0-180)
+    tolerance_s: Saturation tolerance (0-255)
+    tolerance_v: Value tolerance (0-255)
+    """
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    target_hsv = cv2.cvtColor(np.uint8([[target_color]]), cv2.COLOR_BGR2HSV)[0][0]
+    
+    # Handle potential negative values and overflow
+    lower_bound = np.array([
+        max(0, target_hsv[0] - tolerance_h),
+        max(0, target_hsv[1] - tolerance_s),
+        max(0, target_hsv[2] - tolerance_v)
+    ], dtype=np.uint8)  # Add explicit dtype
+    
+    upper_bound = np.array([
+        min(180, target_hsv[0] + tolerance_h),
+        min(255, target_hsv[1] + tolerance_s),
+        min(255, target_hsv[2] + tolerance_v)
+    ], dtype=np.uint8)  # Add explicit dtype
+    
+    mask = cv2.inRange(hsv_image, lower_bound, upper_bound)
+    
+    # Fix the morphology operations
+    kernel = np.ones((3,3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)  # Fixed constant name
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)   # Fixed constant name
+    
+    edges = cv2.Canny(mask, 50, 150)
+    
+    return edges, mask
+
 class CNCVisionApp:
     def __init__(self, master):
         self.master = master
         master.title("CNC Vision Pro Smooth Preview")
         master.geometry("950x950")
 
+        # Create main canvas with scrollbar
+        self.main_canvas = tk.Canvas(master)
+        self.scrollbar = tk.Scrollbar(master, orient="vertical", command=self.main_canvas.yview)
+        self.scrollable_frame = tk.Frame(self.main_canvas)
+
+        # Configure the canvas
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.main_canvas.configure(
+                scrollregion=self.main_canvas.bbox("all")
+            )
+        )
+
+        # Create a window in the canvas to hold the scrollable frame
+        self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.main_canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        # Pack the scrollbar and canvas
+        self.scrollbar.pack(side="right", fill="y")
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+
+        # Add mousewheel scrolling
+        self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        # Move all variable initializations to the top
         self.image_path = None
         self.edge_image = None
         self.selected_camera = tk.StringVar()
@@ -66,6 +127,15 @@ class CNCVisionApp:
         self.inches_per_pixel = tk.DoubleVar(value=0.04)
         self.canny_low = tk.IntVar(value=50)
         self.canny_high = tk.IntVar(value=150)
+        
+        # Add the color detection variables here, before creating UI elements
+        self.color_mode = tk.BooleanVar(value=False)
+        self.target_color = None
+        self.color_tolerance_h = tk.IntVar(value=30)
+        self.color_tolerance_s = tk.IntVar(value=50)
+        self.color_tolerance_v = tk.IntVar(value=50)
+        self.last_mask = None
+
         self.capture_directory = "captures"
         os.makedirs(self.capture_directory, exist_ok=True)
 
@@ -80,15 +150,17 @@ class CNCVisionApp:
         self.selected_camera.set(self.available_cameras[0])
 
         # === Layout: Previews at the top ===
-        self.preview_frame = tk.Frame(master, bd=2, relief=tk.GROOVE)
+        self.preview_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE)
         self.preview_frame.pack(pady=10)
         self.preview_label_original = tk.Label(self.preview_frame)
         self.preview_label_original.pack(side=tk.LEFT, padx=5, pady=5)
         self.preview_label_edges = tk.Label(self.preview_frame)
-        self.preview_label_edges.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.preview_label_edges.pack(side=tk.LEFT, padx=5, pady=5)
+        self.preview_label_mask = tk.Label(self.preview_frame)
+        self.preview_label_mask.pack(side=tk.LEFT, padx=5, pady=5)
 
         # === Settings below the preview ===
-        settings_frame = tk.Frame(master, bd=2, relief=tk.GROOVE, padx=10, pady=10)
+        settings_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE, padx=10, pady=10)
         settings_frame.pack(pady=10, fill=tk.X, expand=True)
 
         tk.Label(settings_frame, text="Inches per Pixel:").pack(anchor='w', pady=2)
@@ -119,20 +191,48 @@ class CNCVisionApp:
         tk.Label(slider_frame, text="Upper Threshold").pack(anchor='w')
         tk.Scale(slider_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.canny_high, command=lambda _: self.refresh_preview()).pack(fill=tk.X)
 
+        # === Color Detection ===
+        color_frame = tk.LabelFrame(settings_frame, text="Color Detection", padx=10, pady=10)
+        color_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Checkbutton(color_frame, text="Use Color Detection", 
+                       variable=self.color_mode, 
+                       command=self.refresh_preview).pack(anchor='w')
+        tk.Button(color_frame, text="Pick Color", 
+                  command=self.pick_color).pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(color_frame, text="Hue Tolerance").pack(anchor='w')
+        tk.Scale(color_frame, from_=0, to=90, orient=tk.HORIZONTAL, 
+                 variable=self.color_tolerance_h,
+                 command=lambda _: self.refresh_preview()).pack(fill=tk.X)
+        
+        tk.Label(color_frame, text="Saturation Tolerance").pack(anchor='w')
+        tk.Scale(color_frame, from_=0, to=255, orient=tk.HORIZONTAL, 
+                 variable=self.color_tolerance_s,
+                 command=lambda _: self.refresh_preview()).pack(fill=tk.X)
+        
+        tk.Label(color_frame, text="Value Tolerance").pack(anchor='w')
+        tk.Scale(color_frame, from_=0, to=255, orient=tk.HORIZONTAL, 
+                 variable=self.color_tolerance_v,
+                 command=lambda _: self.refresh_preview()).pack(fill=tk.X)
+
         # === Control Buttons ===
-        button_frame = tk.Frame(master, pady=10)
+        button_frame = tk.Frame(self.scrollable_frame, pady=10)
         button_frame.pack(pady=10, fill=tk.X)
         tk.Button(button_frame, text="Capture Latest Image", command=self.capture_image).pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
         tk.Button(button_frame, text="Auto-Load Latest Capture", command=self.load_latest_capture).pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
         tk.Button(button_frame, text="Generate Simplified DXF", command=self.process_image).pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
 
-        self.status_label = tk.Label(master, text="", fg="blue")
+        self.status_label = tk.Label(self.scrollable_frame, text="", fg="blue")
         self.status_label.pack(pady=10)
 
         self.cap = None
         self.preview_running = False
         self.preview_thread = None
         self.frame_buffer = deque(maxlen=2)
+
+        self.update_queue = Queue()
+        self.check_queue()  # Start queue checking
 
         self.open_live_preview()
 
@@ -191,23 +291,67 @@ class CNCVisionApp:
 
     def process_and_queue_gui_update(self, frame):
         frame_resized = cv2.resize(frame, (400, 300))
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
+        if self.color_mode.get() and self.target_color is not None:
+            edges, mask = color_based_edge_detection(
+                frame_resized, 
+                self.target_color,
+                tolerance_h=self.color_tolerance_h.get(),
+                tolerance_s=self.color_tolerance_s.get(),
+                tolerance_v=self.color_tolerance_v.get()
+            )
+            self.last_mask = mask
+            
+            # Create a colored visualization of the mask
+            mask_colored = np.zeros_like(frame_resized)
+            mask_colored[mask > 0] = [0, 255, 0]  # Make detected areas green
+            
+            # Blend with original image for better visualization
+            alpha = 0.5
+            mask_blend = cv2.addWeighted(frame_resized, alpha, mask_colored, 1-alpha, 0)
+        else:
+            gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+            self.last_mask = None
+            mask_blend = np.zeros_like(frame_resized)
+
+        # Queue the update instead of doing it directly
+        self.update_queue.put((frame_resized, edges, mask_blend))
+
+    def check_queue(self):
+        """Check for pending GUI updates"""
+        try:
+            while True:
+                # Get all pending updates
+                frame, edges, mask = self.update_queue.get_nowait()
+                self.update_gui_from_main_thread(frame, edges, mask)
+        except Queue.Empty:
+            pass
+        finally:
+            # Schedule the next queue check
+            self.master.after(10, self.check_queue)
+
+    def update_gui_from_main_thread(self, frame, edges, mask):
+        """Update GUI elements from the main thread"""
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img_original = Image.fromarray(frame_rgb)
         imgtk_original = ImageTk.PhotoImage(image=img_original)
-
-        gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
-        img_edges = Image.fromarray(edges)
+        
+        edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
+        img_edges = Image.fromarray(edges_rgb)
         imgtk_edges = ImageTk.PhotoImage(image=img_edges)
-
-        self.master.after(0, self.update_gui, imgtk_original, imgtk_edges)
-
-    def update_gui(self, imgtk_original, imgtk_edges):
+        
+        mask_rgb = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
+        img_mask = Image.fromarray(mask_rgb)
+        imgtk_mask = ImageTk.PhotoImage(image=img_mask)
+        
         self.preview_label_original.imgtk = imgtk_original
         self.preview_label_original.configure(image=imgtk_original)
         self.preview_label_edges.imgtk = imgtk_edges
         self.preview_label_edges.configure(image=imgtk_edges)
+        self.preview_label_mask.imgtk = imgtk_mask
+        self.preview_label_mask.configure(image=imgtk_mask)
 
     def refresh_preview(self):
         if self.frame_buffer:
@@ -242,9 +386,19 @@ class CNCVisionApp:
 
         if success:
             frame = cv2.imread(image_path)
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+            
+            if self.color_mode.get() and self.target_color is not None:
+                edges, _ = color_based_edge_detection(
+                    frame,
+                    self.target_color,
+                    tolerance_h=self.color_tolerance_h.get(),
+                    tolerance_s=self.color_tolerance_s.get(),
+                    tolerance_v=self.color_tolerance_v.get()
+                )
+            else:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
 
             cv2.imwrite(edges_path, edges)
             self.image_path = edges_path
@@ -274,8 +428,22 @@ class CNCVisionApp:
 
         try:
             image = cv2.imread(self.image_path)
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+            
+            if self.color_mode.get() and self.target_color is not None:
+                # Use color-based detection for DXF
+                _, mask = color_based_edge_detection(
+                    image,
+                    self.target_color,
+                    tolerance_h=self.color_tolerance_h.get(),
+                    tolerance_s=self.color_tolerance_s.get(),
+                    tolerance_v=self.color_tolerance_v.get()
+                )
+                thresh = mask
+            else:
+                # Use regular edge detection
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             doc = ezdxf.new()
@@ -296,6 +464,26 @@ class CNCVisionApp:
 
         except Exception as e:
             messagebox.showerror("Processing Error", str(e))
+
+    def pick_color(self):
+        if not self.frame_buffer:
+            messagebox.showerror("Error", "No image available")
+            return
+            
+        def on_mouse_click(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                frame = self.frame_buffer[-1]
+                self.target_color = frame[y, x]
+                cv2.destroyWindow("Pick Color")
+                self.refresh_preview()
+        
+        frame = self.frame_buffer[-1].copy()
+        cv2.namedWindow("Pick Color")
+        cv2.setMouseCallback("Pick Color", on_mouse_click)
+        cv2.imshow("Pick Color", frame)
+
+    def _on_mousewheel(self, event):
+        self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 # === Run the app ===
 if __name__ == "__main__":
