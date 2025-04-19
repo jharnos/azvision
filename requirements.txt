@@ -1,0 +1,4 @@
+opencv-python>=4.5.0
+numpy>=1.19.0
+ezdxf>=0.16.0
+pillow>=8.0.0
