@@ -1,3 +1,4 @@
 *.dxf
 captures/*.jpg
 .history
+*.png
