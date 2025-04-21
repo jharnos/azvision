@@ -205,7 +205,7 @@ class CNCVisionApp:
         self.edge_image = None
         self.selected_camera = tk.StringVar()
         self.selected_resolution = tk.StringVar(value="1920x1080")
-        self.inches_per_pixel = tk.DoubleVar(value=0.04)
+        self.inches_per_pixel = tk.DoubleVar(value=0.0604)
         self.canny_low = tk.IntVar(value=50)
         self.canny_high = tk.IntVar(value=150)
         
@@ -257,17 +257,17 @@ class CNCVisionApp:
         settings_frame.grid_columnconfigure((0,1), weight=1)
 
         # Create left and right columns
-        left_column = tk.Frame(settings_frame, bg=self.colors['main'])
-        left_column.grid(row=0, column=0, sticky="nsew", padx=2)
-        left_column.grid_columnconfigure(0, weight=1)
+        self.left_column = tk.Frame(settings_frame, bg=self.colors['main'])  # Store as instance variable
+        self.left_column.grid(row=0, column=0, sticky="nsew", padx=2)
+        self.left_column.grid_columnconfigure(0, weight=1)
         
-        right_column = tk.Frame(settings_frame, bg=self.colors['main'])
-        right_column.grid(row=0, column=1, sticky="nsew", padx=2)
-        right_column.grid_columnconfigure(0, weight=1)
+        self.right_column = tk.Frame(settings_frame, bg=self.colors['main'])  # Already stored
+        self.right_column.grid(row=0, column=1, sticky="nsew", padx=2)
+        self.right_column.grid_columnconfigure(0, weight=1)
 
         # === Left Column (Canny Edge Settings) ===
         # Basic settings
-        basic_settings = tk.LabelFrame(left_column, text="Basic Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
+        basic_settings = tk.LabelFrame(self.left_column, text="Basic Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         basic_settings.grid(row=0, column=0, sticky="ew", pady=2)
         basic_settings.grid_columnconfigure(0, weight=1)
         
@@ -275,7 +275,7 @@ class CNCVisionApp:
         tk.Entry(basic_settings, textvariable=self.inches_per_pixel).grid(row=1, column=0, sticky="ew")
 
         # Camera settings
-        camera_settings = tk.LabelFrame(left_column, text="Camera Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
+        camera_settings = tk.LabelFrame(self.left_column, text="Camera Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         camera_settings.grid(row=1, column=0, sticky="ew", pady=2)
         camera_settings.grid_columnconfigure(0, weight=1)
         
@@ -299,22 +299,22 @@ class CNCVisionApp:
         check_res_button.grid(row=5, column=0, sticky="ew", pady=2)
 
         # Canny Edge settings
-        canny_frame = tk.LabelFrame(left_column, text="Canny Edge Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
+        canny_frame = tk.LabelFrame(self.left_column, text="Canny Edge Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         canny_frame.grid(row=2, column=0, sticky="ew", pady=2)
         canny_frame.grid_columnconfigure(0, weight=1)
-        
+
         tk.Label(canny_frame, text="Lower Threshold", height=1).grid(row=0, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL, 
                  variable=self.canny_low,
                  command=lambda _: self.refresh_preview()).grid(row=1, column=0, sticky="ew")
-        
+
         tk.Label(canny_frame, text="Upper Threshold", height=1).grid(row=2, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.canny_high,
                  command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
 
         # === Right Column (Color Detection) ===
-        color_frame = tk.LabelFrame(right_column, text="Color Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
+        color_frame = tk.LabelFrame(self.right_column, text="Color Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
         color_frame.grid(row=0, column=0, sticky="ew", pady=2)
         color_frame.grid_columnconfigure(0, weight=1)
         
@@ -364,14 +364,27 @@ class CNCVisionApp:
         # === Control Buttons at the bottom ===
         button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
         button_frame.grid(row=2, column=0, sticky="ew", pady=2)
-        button_frame.grid_columnconfigure((0,1,2), weight=1)
+        button_frame.grid_columnconfigure((0,1,2,3), weight=1)  # Four columns for four buttons
         
         tk.Button(button_frame, text="Capture Latest Image",
-                  command=self.capture_image, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=0, padx=2, sticky="ew")
+                  command=self.capture_image, 
+                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
+                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=0, padx=2, sticky="ew")
+
         tk.Button(button_frame, text="Auto-Load Latest Capture",
-                  command=self.load_latest_capture, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=1, padx=2, sticky="ew")
+                  command=self.load_latest_capture, 
+                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
+                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=1, padx=2, sticky="ew")
+
+        tk.Button(button_frame, text="Camera Calibration",
+                  command=self.open_calibration_window,
+                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
+                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
+
         tk.Button(button_frame, text="Generate Simplified DXF",
-                  command=self.process_image, **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
+                  command=self.process_image, 
+                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
+                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=3, padx=2, sticky="ew")
 
         # Status label
         self.status_label = tk.Label(self.scrollable_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
@@ -404,8 +417,12 @@ class CNCVisionApp:
         self.control_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         
         # Now create exposure controls
-        self.right_column = right_column  # Store as instance variable
+        self.right_column = self.right_column  # Store as instance variable
         self.create_exposure_controls()
+
+        # Add with other variable initializations
+        self.calibration_points = []
+        self.known_distance = tk.DoubleVar(value=1.0)
 
     # === Application logic ===
     def get_resolution_tuple(self):
@@ -521,6 +538,24 @@ class CNCVisionApp:
                 blurred = cv2.GaussianBlur(gray, (5, 5), 0)
                 edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
                 mask_blend = frame_resized.copy()
+
+            # Add scale indicator if calibrated
+            if hasattr(self, 'calibration_points') and len(self.calibration_points) == 2:
+                cv2.line(frame_resized, 
+                        (int(self.calibration_points[0][0] * preview_width/width), 
+                         int(self.calibration_points[0][1] * preview_height/height)),
+                        (int(self.calibration_points[1][0] * preview_width/width), 
+                         int(self.calibration_points[1][1] * preview_height/height)),
+                        (0, 255, 0), 2)
+                
+                # Add distance label
+                mid_x = (self.calibration_points[0][0] + self.calibration_points[1][0]) // 2
+                mid_y = (self.calibration_points[0][1] + self.calibration_points[1][1]) // 2
+                cv2.putText(frame_resized, 
+                           f"{self.known_distance.get():.2f}\"",
+                           (int(mid_x * preview_width/width), 
+                            int(mid_y * preview_height/height)),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             # Update the GUI
             self.update_gui_from_main_thread(frame_resized, edges, mask_blend)
@@ -732,7 +767,9 @@ class CNCVisionApp:
 
         try:
             image = cv2.imread(self.image_path)
-            print(f"Original image shape: {image.shape}")
+            print(f"\nDXF Export Debug:")
+            print(f"Current inches_per_pixel: {inches_per_pixel:.6f}")
+            print(f"Image dimensions: {image.shape[1]}x{image.shape[0]} pixels")
             
             # Normalize the image to improve contrast
             image_float = image.astype(np.float32)
@@ -766,17 +803,24 @@ class CNCVisionApp:
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             print(f"Contours found: {len(contours)}")
 
-            doc = ezdxf.new()
+            # Create new DXF document with inches as units
+            doc = ezdxf.new(setup=True)
+            doc.header['$INSUNITS'] = 1  # 1 = Inches
+            doc.header['$LUNITS'] = 2    # 2 = Decimal
+            doc.header['$MEASUREMENT'] = 1  # 1 = English (inches)
             msp = doc.modelspace()
 
+            # Get image height for vertical flipping
+            img_height = image.shape[0]
             valid_contours = 0
+            
             for i, contour in enumerate(contours):
                 # Process larger contours with more detail
                 area = cv2.contourArea(contour)
                 if area < 3:  # Reduced minimum area
                     continue
                 
-                # Adjust simplification based on contour size
+                # Calculate tolerance based on contour size
                 if area > 1000:
                     tolerance = 0.3  # More detail for large contours
                 elif area > 100:
@@ -786,7 +830,30 @@ class CNCVisionApp:
                 
                 # Simplify while preserving more points
                 simplified = simplify_contour(contour, tolerance=tolerance)
-                points = [(pt[0][0] * inches_per_pixel, pt[0][1] * inches_per_pixel) for pt in simplified]
+                
+                # Debug: Print points for first contour
+                if i == 0:
+                    print(f"\nFirst contour debug:")
+                    print(f"Contour area: {area:.2f} pixels")
+                    print(f"Number of points before simplification: {len(contour)}")
+                    print(f"Number of points after simplification: {len(simplified)}")
+                    
+                    # Print first few points before and after scaling
+                    print("\nFirst few points:")
+                    for j in range(min(3, len(simplified))):
+                        orig_x, orig_y = simplified[j][0]
+                        scaled_x = orig_x * inches_per_pixel
+                        scaled_y = (img_height - orig_y) * inches_per_pixel
+                        print(f"Point {j}:")
+                        print(f"  Original: ({orig_x:.2f}, {orig_y:.2f})")
+                        print(f"  Scaled: ({scaled_x:.2f}, {scaled_y:.2f})")
+                
+                # Convert points and flip Y coordinates
+                points = []
+                for pt in simplified:
+                    x = pt[0][0] * inches_per_pixel
+                    y = (img_height - pt[0][1]) * inches_per_pixel  # Flip Y coordinate
+                    points.append((x, y))
                 
                 if len(points) > 2:
                     try:
@@ -798,7 +865,8 @@ class CNCVisionApp:
 
             print(f"Valid contours processed: {valid_contours}")
 
-            output_path = filedialog.asksaveasfilename(defaultextension=".dxf", filetypes=[("DXF files", "*.dxf")])
+            output_path = filedialog.asksaveasfilename(defaultextension=".dxf", 
+                                                      filetypes=[("DXF files", "*.dxf")])
             if output_path:
                 doc.saveas(output_path)
                 messagebox.showinfo("Success", f"DXF saved to: {output_path}")
@@ -806,7 +874,7 @@ class CNCVisionApp:
 
         except Exception as e:
             print(f"Error in process_image: {str(e)}")
-            traceback.print_exc()  # Print full error traceback
+            traceback.print_exc()
             messagebox.showerror("Processing Error", str(e))
 
     def pick_color(self):
@@ -1138,6 +1206,341 @@ class CNCVisionApp:
                 print(f"Contrast: {self.contrast_var.get()}")
             except Exception as e:
                 print(f"Error updating camera settings: {str(e)}")
+
+    def open_calibration_window(self):
+        if not self.frame_buffer:
+            messagebox.showerror("Error", "Camera preview must be running")
+            return
+        
+        CalibrationWindow(self.master, self.inches_per_pixel, self.on_calibration_complete)
+
+    def on_calibration_complete(self, new_scale):
+        if new_scale is not None:
+            self.status_label.config(text=f"Calibration updated: 1 pixel = {new_scale:.6f} inches")
+
+class CalibrationWindow:
+    def __init__(self, parent, inches_per_pixel, on_calibration_complete):
+        self.window = tk.Toplevel(parent)
+        self.window.title("Camera Calibration")
+        self.window.geometry("400x500")
+        
+        # Center the window on screen
+        self.window.geometry("+%d+%d" % (
+            parent.winfo_rootx() + 50,
+            parent.winfo_rooty() + 50))
+        
+        # Store parameters
+        self.parent = parent
+        self.inches_per_pixel = inches_per_pixel
+        self.on_calibration_complete = on_calibration_complete
+        self.calibration_points = []
+        self.picker_window = None
+        
+        # Main frame with padding
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Current scale display
+        scale_frame = ttk.LabelFrame(main_frame, text="Current Scale", padding="5")
+        scale_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.scale_label = ttk.Label(scale_frame, 
+                                   text=f"1 pixel = {inches_per_pixel.get():.6f} inches")
+        self.scale_label.pack()
+        
+        # Calibration controls
+        cal_frame = ttk.LabelFrame(main_frame, text="New Calibration", padding="5")
+        cal_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Known distance input
+        dist_frame = ttk.Frame(cal_frame)
+        dist_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(dist_frame, text="Known Distance:").pack(side=tk.LEFT)
+        self.known_distance = tk.DoubleVar(value=1.0)
+        ttk.Entry(dist_frame, textvariable=self.known_distance, 
+                 width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(dist_frame, text="inches").pack(side=tk.LEFT)
+        
+        # Instructions
+        instruction_text = ("To calibrate:\n\n"
+                          "1. Place an object with a known dimension in the camera view\n"
+                          "2. Enter that dimension in inches above\n"
+                          "3. Click 'Start Measurement'\n"
+                          "4. Click the start and end points of your known dimension\n"
+                          "5. The scale will be automatically calculated")
+        
+        ttk.Label(cal_frame, text=instruction_text, 
+                 justify=tk.LEFT, wraplength=350).pack(pady=10)
+        
+        # Buttons
+        btn_frame = ttk.Frame(cal_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(btn_frame, text="Start Measurement",
+                  command=self.start_calibration).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Reset to Default",
+                  command=self.reset_calibration).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close",
+                  command=self.close_window).pack(side=tk.RIGHT, padx=5)
+        
+        # Status
+        self.status_label = ttk.Label(cal_frame, text="")
+        self.status_label.pack(pady=5)
+        
+        # Make window modal
+        self.window.transient(parent)
+        self.window.grab_set()
+        self.window.focus_set()
+        
+        # Bind window close event
+        self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+
+    def start_calibration(self):
+        if not hasattr(app, 'frame_buffer') or not app.frame_buffer:
+            messagebox.showerror("Error", "No camera feed available")
+            return
+        
+        self.show_calibration_picker()
+
+    def show_calibration_picker(self):
+        if self.picker_window:
+            try:
+                self.picker_window.close()
+            except:
+                pass
+        
+        # Create new picker window
+        self.picker_window = CalibrationPicker(self.window, 
+                                             self.known_distance.get(),
+                                             self.on_calibration_done)
+        
+        # Position picker window next to main calibration window
+        self.picker_window.window.geometry("+%d+%d" % (
+            self.window.winfo_rootx() + self.window.winfo_width() + 10,
+            self.window.winfo_rooty()))
+        
+        # Ensure picker window is visible and focused
+        self.picker_window.window.lift()
+        self.picker_window.window.focus_force()
+
+    def on_calibration_done(self, new_scale):
+        if new_scale is not None:
+            self.inches_per_pixel.set(new_scale)
+            self.scale_label.config(text=f"1 pixel = {new_scale:.6f} inches")
+            self.status_label.config(text="Calibration successful!")
+            self.on_calibration_complete(new_scale)
+
+    def reset_calibration(self):
+        self.inches_per_pixel.set(0.04)  # Default value
+        self.scale_label.config(text=f"1 pixel = 0.040000 inches")
+        self.status_label.config(text="Reset to default scale")
+        self.on_calibration_complete(0.04)
+
+    def close_window(self):
+        if self.picker_window:
+            try:
+                self.picker_window.close()
+            except:
+                pass
+        self.window.grab_release()
+        self.window.destroy()
+
+class CalibrationPicker:
+    def __init__(self, parent, known_distance, callback):
+        self.window = tk.Toplevel(parent)
+        self.window.title("Measure Known Distance")
+        
+        # Get screen dimensions
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        
+        self.known_distance = known_distance
+        self.callback = callback
+        self.points = []
+        
+        # Get current frame from camera
+        frame = app.frame_buffer[-1].copy()
+        height, width = frame.shape[:2]
+        
+        # Calculate preview size to be 80% of screen height while maintaining aspect ratio
+        max_preview_height = int(screen_height * 0.8)
+        max_preview_width = int(screen_width * 0.8)
+        
+        # Calculate preview dimensions maintaining aspect ratio
+        preview_height = max_preview_height
+        preview_width = int(width * (preview_height / height))
+        
+        # If width is too large, scale down based on width instead
+        if preview_width > max_preview_width:
+            preview_width = max_preview_width
+            preview_height = int(height * (preview_width / width))
+        
+        # Resize frame for preview
+        preview_frame = cv2.resize(frame, (preview_width, preview_height))
+        
+        # Draw measurement guide (smaller font)
+        guide_frame = preview_frame.copy()
+        cv2.putText(guide_frame, 
+                   f"Click start and end points of {known_distance} inch dimension",
+                   (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        
+        preview_image = Image.fromarray(cv2.cvtColor(guide_frame, cv2.COLOR_BGR2RGB))
+        self.imgtk = ImageTk.PhotoImage(image=preview_image)
+        
+        # Create main frame with minimal padding
+        main_frame = ttk.Frame(self.window, padding="2")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Instructions with smaller font
+        self.instruction_label = ttk.Label(
+            main_frame,
+            text=f"Click the start point of your {known_distance} inch measurement",
+            font=('Arial', 8)  # Reduced from 10
+        )
+        self.instruction_label.pack(pady=(2,0))
+        
+        # Canvas for image display
+        self.canvas = tk.Canvas(main_frame, 
+                              width=preview_width, 
+                              height=preview_height,
+                              bg='black')
+        self.canvas.pack(pady=2)  # Reduced padding
+        
+        self.canvas.create_image(0, 0, anchor="nw", image=self.imgtk)
+        
+        # Button frame immediately after canvas
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(0,2))  # Minimal padding
+        
+        # Reset and Cancel buttons
+        ttk.Button(btn_frame, 
+                  text="Reset Points",
+                  command=self.reset_points).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(btn_frame, 
+                  text="Cancel",
+                  command=self.cancel).pack(side=tk.LEFT, padx=2)
+        
+        # Store original dimensions for scaling
+        self.orig_width = width
+        self.orig_height = height
+        self.preview_width = preview_width
+        self.preview_height = preview_height
+        
+        # Bind click event
+        self.canvas.bind("<Button-1>", self.on_click)
+        
+        # Make window modal
+        self.window.transient(parent)
+        self.window.grab_set()
+        self.window.focus_force()
+        
+        # Center window on screen with minimal padding
+        window_width = preview_width + 10
+        window_height = preview_height + 50  # Reduced from 80
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Bind window close event
+        self.window.protocol("WM_DELETE_WINDOW", self.cancel)
+
+    def reset_points(self):
+        """Reset all points and clear drawings"""
+        self.points = []
+        self.canvas.delete("point", "line", "label")
+        self.instruction_label.config(
+            text=f"Click the start point of your {self.known_distance} inch measurement"
+        )
+
+    def on_click(self, event):
+        # Map preview coordinates to original image coordinates
+        x = event.x * (self.orig_width / self.preview_width)
+        y = event.y * (self.orig_height / self.preview_height)
+        
+        self.points.append((x, y))
+        
+        # Draw point with smaller radius
+        radius = 3  # Further reduced
+        self.canvas.create_oval(
+            event.x-radius, event.y-radius,
+            event.x+radius, event.y+radius,
+            fill='red',
+            outline='white',
+            width=1,
+            tags="point"
+        )
+        
+        if len(self.points) == 1:
+            self.instruction_label.config(
+                text=f"Click the end point of your {self.known_distance} inch measurement"
+            )
+            # Draw start point label with smaller font
+            self.canvas.create_text(
+                event.x + 8, event.y + 8,
+                text="Start",
+                fill='red',
+                font=('Arial', 6),  # Reduced from 8
+                tags="label"
+            )
+        elif len(self.points) == 2:
+            # Draw end point label with smaller font
+            self.canvas.create_text(
+                event.x + 8, event.y + 8,
+                text="End",
+                fill='red',
+                font=('Arial', 6),  # Reduced from 8
+                tags="label"
+            )
+            
+            # Draw line between points in preview
+            start_x = self.points[0][0] * (self.preview_width / self.orig_width)
+            start_y = self.points[0][1] * (self.preview_height / self.orig_height)
+            self.canvas.create_line(
+                start_x, start_y,
+                event.x, event.y,
+                fill='red',
+                width=3,  # Increased from 2
+                tags="line"
+            )
+            
+            # Calculate scale using original image coordinates
+            dx = self.points[1][0] - self.points[0][0]
+            dy = self.points[1][1] - self.points[0][1]
+            pixel_distance = np.sqrt(dx*dx + dy*dy)
+            
+            # Calculate new scale (inches per pixel)
+            new_scale = self.known_distance / pixel_distance
+            
+            print("\nCalibration Debug:")
+            print(f"Point 1: ({self.points[0][0]:.2f}, {self.points[0][1]:.2f})")
+            print(f"Point 2: ({self.points[1][0]:.2f}, {self.points[1][1]:.2f})")
+            print(f"Pixel distance: {pixel_distance:.2f}")
+            print(f"Known distance: {self.known_distance:.2f} inches")
+            print(f"Calculated scale: {new_scale:.6f} inches/pixel")
+            
+            # Add verification calculation
+            expected_distance = pixel_distance * new_scale
+            print(f"Verification - measured distance: {expected_distance:.2f} inches")
+            
+            # Update instruction label to show measurement
+            self.instruction_label.config(
+                text=f"Measured {pixel_distance:.1f} pixels = {self.known_distance:.2f} inches\n"
+                     f"Click 'Reset Points' to try again or close window to accept"
+            )
+            
+            # Store the scale factor
+            self.current_scale = new_scale
+
+    def cancel(self):
+        self.callback(None)
+        self.close()
+
+    def close(self):
+        if hasattr(self, 'current_scale'):
+            self.callback(self.current_scale)
+        self.window.grab_release()
+        self.window.destroy()
 
 # === Run the app ===
 if __name__ == "__main__":
