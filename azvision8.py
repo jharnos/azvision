@@ -254,112 +254,132 @@ class CNCVisionApp:
         # === Settings below the preview ===
         settings_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE, bg=self.colors['secondary'])
         settings_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-        settings_frame.grid_columnconfigure((0,1), weight=1)
 
-        # Create left and right columns
-        self.left_column = tk.Frame(settings_frame, bg=self.colors['main'])  # Store as instance variable
-        self.left_column.grid(row=0, column=0, sticky="nsew", padx=2)
+        # Make sure the settings frame uses full width
+        self.scrollable_frame.grid_columnconfigure(0, weight=1)
+        settings_frame.grid_columnconfigure((0,1,2), weight=1, uniform='equal')
+
+        # Create three columns
+        self.left_column = tk.Frame(settings_frame, bg=self.colors['main'])
+        self.left_column.grid(row=0, column=0, sticky="nsew", padx=1)
         self.left_column.grid_columnconfigure(0, weight=1)
-        
-        self.right_column = tk.Frame(settings_frame, bg=self.colors['main'])  # Already stored
-        self.right_column.grid(row=0, column=1, sticky="nsew", padx=2)
+
+        self.right_column = tk.Frame(settings_frame, bg=self.colors['main'])
+        self.right_column.grid(row=0, column=1, sticky="nsew", padx=1)
         self.right_column.grid_columnconfigure(0, weight=1)
 
-        # === Left Column (Canny Edge Settings) ===
-        # Basic settings
-        basic_settings = tk.LabelFrame(self.left_column, text="Basic Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
-        basic_settings.grid(row=0, column=0, sticky="ew", pady=2)
-        basic_settings.grid_columnconfigure(0, weight=1)
-        
-        tk.Label(basic_settings, text="Inches per Pixel:").grid(row=0, column=0, sticky="w")
-        tk.Entry(basic_settings, textvariable=self.inches_per_pixel).grid(row=1, column=0, sticky="ew")
+        self.future_column = tk.Frame(settings_frame, bg=self.colors['main'])
+        self.future_column.grid(row=0, column=2, sticky="nsew", padx=1)
+        self.future_column.grid_columnconfigure(0, weight=1)
 
-        # Camera settings
-        camera_settings = tk.LabelFrame(self.left_column, text="Camera Settings", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
-        camera_settings.grid(row=1, column=0, sticky="ew", pady=2)
-        camera_settings.grid_columnconfigure(0, weight=1)
-        
-        tk.Label(camera_settings, text="Select Camera:").grid(row=0, column=0, sticky="w")
-        self.camera_menu = tk.OptionMenu(camera_settings, self.selected_camera, *self.available_cameras, 
-                                       command=self.change_camera)
-        self.camera_menu.grid(row=1, column=0, sticky="ew")
-
-        tk.Label(camera_settings, text="Select Resolution:").grid(row=2, column=0, sticky="w")
-        resolutions = ["640x480", "1280x720", "1920x1080", "2560x1440"]
-        self.resolution_menu = tk.OptionMenu(camera_settings, self.selected_resolution, *resolutions,
-                                           command=self.change_resolution)
-        self.resolution_menu.grid(row=3, column=0, sticky="ew")
-
-        self.resolution_label = tk.Label(camera_settings, text="Capture resolution: 1920 x 1080")
-        self.resolution_label.grid(row=4, column=0, sticky="w")
-
-        # Check resolution button
-        check_res_button = tk.Button(camera_settings, text="Check Available Resolutions",
-                                   command=lambda: self.check_current_camera_resolutions())
-        check_res_button.grid(row=5, column=0, sticky="ew", pady=2)
-
+        # === Left Column (Edge Detection) ===
         # Canny Edge settings
-        canny_frame = tk.LabelFrame(self.left_column, text="Canny Edge Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
-        canny_frame.grid(row=2, column=0, sticky="ew", pady=2)
+        canny_frame = tk.LabelFrame(self.left_column, text="Edge Detection", 
+                                  **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                     'font': ('Arial', 8, 'bold')})
+        canny_frame.grid(row=0, column=0, sticky="ew", pady=1)
         canny_frame.grid_columnconfigure(0, weight=1)
 
-        tk.Label(canny_frame, text="Lower Threshold", height=1).grid(row=0, column=0, sticky="w")
+        # Basic settings in edge detection frame
+        tk.Label(canny_frame, text="Inches per Pixel:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        tk.Entry(canny_frame, textvariable=self.inches_per_pixel, width=10).grid(row=1, column=0, sticky="ew", padx=2)
+
+        tk.Label(canny_frame, text="Lower Threshold", font=('Arial', 8)).grid(row=2, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL, 
                  variable=self.canny_low,
-                 command=lambda _: self.refresh_preview()).grid(row=1, column=0, sticky="ew")
+                 command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
 
-        tk.Label(canny_frame, text="Upper Threshold", height=1).grid(row=2, column=0, sticky="w")
+        tk.Label(canny_frame, text="Upper Threshold", font=('Arial', 8)).grid(row=4, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.canny_high,
-                 command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
+                 command=lambda _: self.refresh_preview()).grid(row=5, column=0, sticky="ew")
+
+        # Camera settings below edge detection
+        camera_frame = tk.LabelFrame(self.left_column, text="Camera Settings", 
+                                   **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                      'font': ('Arial', 8, 'bold')})
+        camera_frame.grid(row=1, column=0, sticky="ew", pady=1)
+        camera_frame.grid_columnconfigure(0, weight=1)
+
+        camera_grid = tk.Frame(camera_frame, bg=self.colors['secondary'])
+        camera_grid.grid(row=0, column=0, sticky="ew")
+        camera_grid.grid_columnconfigure(1, weight=1)
+
+        tk.Label(camera_grid, text="Camera:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        self.camera_menu = tk.OptionMenu(camera_grid, self.selected_camera, *self.available_cameras, 
+                                       command=self.change_camera)
+        self.camera_menu.grid(row=0, column=1, sticky="ew", padx=2)
+        self.camera_menu.configure(font=('Arial', 8))
+
+        tk.Label(camera_grid, text="Resolution:", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
+        resolutions = ["640x480", "1280x720", "1920x1080", "2560x1440"]
+        self.resolution_menu = tk.OptionMenu(camera_grid, self.selected_resolution, *resolutions,
+                                           command=self.change_resolution)
+        self.resolution_menu.grid(row=1, column=1, sticky="ew", padx=2)
+        self.resolution_menu.configure(font=('Arial', 8))
+
+        check_res_button = tk.Button(camera_frame, text="Check Available Resolutions",
+                                   command=lambda: self.check_current_camera_resolutions(),
+                                   font=('Arial', 8))
+        check_res_button.grid(row=1, column=0, sticky="ew", pady=1)
 
         # === Right Column (Color Detection) ===
-        color_frame = tk.LabelFrame(self.right_column, text="Color Detection", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
-        color_frame.grid(row=0, column=0, sticky="ew", pady=2)
+        color_frame = tk.LabelFrame(self.right_column, text="Color Detection", 
+                                  **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                     'font': ('Arial', 8, 'bold')})
+        color_frame.grid(row=0, column=0, sticky="ew", pady=1)
         color_frame.grid_columnconfigure(0, weight=1)
-        
+
         # Color mode toggle and picker
-        mode_frame = tk.Frame(color_frame)
-        mode_frame.grid(row=0, column=0, sticky="ew")
+        mode_frame = tk.Frame(color_frame, bg=self.colors['secondary'])
+        mode_frame.grid(row=0, column=0, sticky="ew", pady=1)
         mode_frame.grid_columnconfigure(1, weight=1)
-        
-        tk.Checkbutton(mode_frame, text="Use Color Detection",
+
+        color_controls = tk.Frame(mode_frame, bg=self.colors['secondary'])
+        color_controls.grid(row=0, column=0, columnspan=2, sticky="ew")
+        color_controls.grid_columnconfigure(1, weight=1)
+
+        tk.Checkbutton(color_controls, text="Use Color",
                        variable=self.color_mode,
-                       command=self.refresh_preview).grid(row=0, column=0, sticky="w")
-        
-        picker_frame = tk.Frame(mode_frame)
+                       command=self.refresh_preview,
+                       font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+
+        picker_frame = tk.Frame(color_controls, bg=self.colors['secondary'])
         picker_frame.grid(row=0, column=1, sticky="e")
-        
-        tk.Label(picker_frame, text="Sample R:").grid(row=0, column=0)
+
+        tk.Label(picker_frame, text="R:", font=('Arial', 8)).grid(row=0, column=0)
         tk.Spinbox(picker_frame, from_=0, to=10, width=3,
-                   textvariable=self.color_sample_radius).grid(row=0, column=1, padx=2)
-        
+                   textvariable=self.color_sample_radius,
+                   font=('Arial', 8)).grid(row=0, column=1, padx=1)
+
         self.color_preview = tk.Canvas(picker_frame, width=20, height=20,
                                      relief='solid', bd=1, bg='#808080')
-        self.color_preview.grid(row=0, column=2, padx=2)
-        
-        tk.Button(picker_frame, text="Pick Color",
-                  command=self.pick_color).grid(row=0, column=3)
+        self.color_preview.grid(row=0, column=2, padx=1)
+
+        tk.Button(picker_frame, text="Pick",
+                  command=self.pick_color,
+                  font=('Arial', 8)).grid(row=0, column=3)
 
         # Color tolerance controls
-        tolerance_frame = tk.LabelFrame(color_frame, text="Color Tolerance", **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 'font': ('Arial', 10, 'bold')})
-        tolerance_frame.grid(row=1, column=0, sticky="ew", pady=2)
+        tolerance_frame = tk.Frame(color_frame, bg=self.colors['secondary'])
+        tolerance_frame.grid(row=1, column=0, sticky="ew")
         tolerance_frame.grid_columnconfigure(0, weight=1)
-        
-        tk.Label(tolerance_frame, text="Hue Tolerance", height=1).grid(row=0, column=0, sticky="w")
-        tk.Scale(tolerance_frame, from_=0, to=90, orient=tk.HORIZONTAL,
-                 variable=self.color_tolerance_h,
-                 command=lambda _: self.refresh_preview()).grid(row=1, column=0, sticky="ew")
-        
-        tk.Label(tolerance_frame, text="Saturation Tolerance", height=1).grid(row=2, column=0, sticky="w")
-        tk.Scale(tolerance_frame, from_=0, to=255, orient=tk.HORIZONTAL,
-                 variable=self.color_tolerance_s,
-                 command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
-        
-        tk.Label(tolerance_frame, text="Value Tolerance", height=1).grid(row=4, column=0, sticky="w")
-        tk.Scale(tolerance_frame, from_=0, to=255, orient=tk.HORIZONTAL,
-                 variable=self.color_tolerance_v,
-                 command=lambda _: self.refresh_preview()).grid(row=5, column=0, sticky="ew")
+
+        for i, (label, var) in enumerate([
+            ("Hue", self.color_tolerance_h),
+            ("Sat", self.color_tolerance_s),
+            ("Val", self.color_tolerance_v)
+        ]):
+            tk.Label(tolerance_frame, text=label, font=('Arial', 8)).grid(row=i*2, column=0, sticky="w")
+            tk.Scale(tolerance_frame, from_=0, to=90 if i==0 else 255, orient=tk.HORIZONTAL,
+                     variable=var,
+                     command=lambda _: self.refresh_preview()).grid(row=i*2+1, column=0, sticky="ew")
+
+        # === Future Column (Empty placeholder) ===
+        future_label = tk.LabelFrame(self.future_column, text="Future Settings", 
+                                   **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                      'font': ('Arial', 8, 'bold')})
+        future_label.grid(row=0, column=0, sticky="nsew", pady=1)
 
         # === Control Buttons at the bottom ===
         button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
