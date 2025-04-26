@@ -12,19 +12,9 @@ import traceback
 from datetime import datetime
 import ezdxf
 
-from ..utils.image_utils import (
-    simplify_contour,
-    normalize_image_safe,
-    color_based_edge_detection
-)
-from ..utils.camera_utils import (
-    list_ffmpeg_cameras,
-    build_camera_index_map,
-    get_camera_resolutions,
-    get_latest_image,
-    print_camera_parameters
-)
-from ..calibration.calibration_window import CalibrationWindow
+from calibration.calibration_window import CalibrationWindow
+from utils.image_utils import color_based_edge_detection, simplify_contour, normalize_image_safe
+from utils.camera_utils import list_ffmpeg_cameras, build_camera_index_map, get_camera_resolutions, get_latest_image, print_camera_parameters
 
 class CNCVisionApp:
     def __init__(self, master):

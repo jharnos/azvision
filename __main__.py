@@ -1,5 +1,6 @@
 import tkinter as tk
-from azvision.gui.main_app import CNCVisionApp
+from gui.main_app import CNCVisionApp
+
 
 def main():
     root = tk.Tk()
