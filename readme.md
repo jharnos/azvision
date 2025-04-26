@@ -47,3 +47,71 @@ git clone https://github.com/your-username/visionflow.git
 cd visionflow
 pip install -r requirements.txt
 ```
+
+## 📦 Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/azvision.git
+cd azvision
+```
+
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## 📦 Usage
+
+1. Run the application:
+```bash
+python -m azvision
+```
+
+2. Select your camera and resolution from the settings panel.
+
+3. Adjust edge detection or color detection settings as needed.
+
+4. Use the camera calibration tool to set up accurate measurements.
+
+5. Capture images and generate DXF files for CNC machining.
+
+## 📦 Camera Setup
+
+- The application supports both DirectShow and FFmpeg cameras
+- Common resolutions (640x480, 1280x720, 1920x1080, 2560x1440) are supported
+- Camera settings can be adjusted in real-time
+
+## 📦 DXF Generation
+
+- Contours are automatically detected and simplified
+- The DXF file is generated with proper scaling based on calibration
+- Output is in inches with decimal precision
+- Contours are closed polylines suitable for CNC machining
+
+## 📦 Development
+
+The application is structured into several modules:
+
+- `azvision/gui/`: GUI components and main application
+- `azvision/utils/`: Utility functions for image processing and camera handling
+- `azvision/calibration/`: Camera calibration functionality
+- `azvision/config.py`: Configuration settings
+
+## 📦 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📦 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
