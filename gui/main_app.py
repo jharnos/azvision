@@ -102,6 +102,7 @@ class CNCVisionApp:
         self.inches_per_pixel = tk.DoubleVar(value=0.0604)
         self.canny_low = tk.IntVar(value=50)
         self.canny_high = tk.IntVar(value=150)
+        self.dxf_rotation = tk.DoubleVar(value=1.2)  # Default rotation of 1.2 degrees clockwise
         
         # Color detection variables
         self.color_mode = tk.BooleanVar(value=False)
@@ -186,6 +187,7 @@ class CNCVisionApp:
         self.create_color_detection_panel()
         self.create_exposure_controls()
         self.create_future_panel()
+        self.create_dxf_settings_panel()  # Add new panel for DXF settings
 
     def create_edge_detection_panel(self):
         """Create the edge detection settings panel"""
@@ -349,6 +351,18 @@ class CNCVisionApp:
                                    **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
                                       'font': ('Arial', 8, 'bold')})
         future_label.grid(row=0, column=0, sticky="nsew", pady=1)
+
+    def create_dxf_settings_panel(self):
+        """Create the DXF settings panel"""
+        dxf_frame = tk.LabelFrame(self.future_column, text="DXF Settings", 
+                                **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                   'font': ('Arial', 8, 'bold')})
+        dxf_frame.grid(row=0, column=0, sticky="ew", pady=1)
+        dxf_frame.grid_columnconfigure(0, weight=1)
+
+        # Rotation adjustment
+        tk.Label(dxf_frame, text="DXF Rotation (degrees):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        tk.Entry(dxf_frame, textvariable=self.dxf_rotation, width=10).grid(row=1, column=0, sticky="ew", padx=2)
 
     def create_control_buttons(self):
         """Create the control buttons at the bottom of the window"""
@@ -671,24 +685,56 @@ class CNCVisionApp:
             # Use current camera settings (they're already set from preview)
             time.sleep(0.5)  # Small delay to ensure settings are applied
             
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                raise Exception("Failed to capture frame")
+            # Capture multiple frames for averaging
+            num_frames = 10  # Number of frames to capture
+            frames = []
+            edges_list = []
             
-            print(f"Capture settings:")
-            print(f"Auto Exposure: {self.auto_exposure.get()}")
-            print(f"Exposure: {self.exposure_var.get()}")
-            print(f"Brightness: {self.brightness_var.get()}")
-            print(f"Contrast: {self.contrast_var.get()}")
+            print(f"Capturing {num_frames} frames for averaging...")
+            self.status_label.config(text=f"Capturing {num_frames} frames...")
+            
+            for i in range(num_frames):
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    raise Exception("Failed to capture frame")
+                
+                frames.append(frame.copy())
+                
+                # Process edges for this frame
+                if self.color_mode.get() and self.target_color is not None:
+                    edges, _ = color_based_edge_detection(
+                        frame,
+                        self.target_color,
+                        tolerance_h=self.color_tolerance_h.get(),
+                        tolerance_s=self.color_tolerance_s.get(),
+                        tolerance_v=self.color_tolerance_v.get(),
+                        debug=False
+                    )
+                else:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                
+                edges_list.append(edges)
+                time.sleep(0.05)  # Small delay between captures
+            
+            # Average the frames
+            avg_frame = np.mean(frames, axis=0).astype(np.uint8)
+            
+            # Combine edges using bitwise OR
+            combined_edges = np.zeros_like(edges_list[0])
+            for edges in edges_list:
+                combined_edges = cv2.bitwise_or(combined_edges, edges)
+            
+            # Save debug images
+            cv2.imwrite("debug_capture_raw.png", avg_frame)
+            cv2.imwrite("debug_combined_edges.png", combined_edges)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             image_path = f"captured_image_{timestamp}.png"
             
-            # Save debug image before processing
-            cv2.imwrite("debug_capture_raw.png", frame)
-            
-            # Save the processed image
-            cv2.imwrite(image_path, frame)
+            # Save the averaged image
+            cv2.imwrite(image_path, avg_frame)
             
             self.image_path = image_path
             self.status_label.config(text=f"Image captured: {image_path}")
@@ -761,14 +807,18 @@ class CNCVisionApp:
 
             # Create new DXF document with inches as units
             doc = ezdxf.new(setup=True)
-            doc.header['$INSUNITS'] = 1  # 1 = Inches
-            doc.header['$LUNITS'] = 2    # 2 = Decimal
-            doc.header['$MEASUREMENT'] = 1  # 1 = English (inches)
+            # Set DXF units to inches
+            doc.header['$INSUNITS'] = 1      # 1 = Inches
+            doc.header['$LUNITS'] = 2        # 2 = Decimal
+            doc.header['$MEASUREMENT'] = 1   # 1 = English (inches)
             msp = doc.modelspace()
 
             # Get image height for vertical flipping
             img_height = image.shape[0]
             valid_contours = 0
+            
+            # Get rotation angle in radians
+            rotation_angle = np.radians(self.dxf_rotation.get())
             
             for i, contour in enumerate(contours):
                 # Process larger contours with more detail
@@ -804,12 +854,27 @@ class CNCVisionApp:
                         print(f"  Original: ({orig_x:.2f}, {orig_y:.2f})")
                         print(f"  Scaled: ({scaled_x:.2f}, {scaled_y:.2f})")
                 
-                # Convert points and flip Y coordinates
+                # Convert points, flip Y coordinates, and apply rotation
                 points = []
                 for pt in simplified:
                     x = pt[0][0] * inches_per_pixel
                     y = (img_height - pt[0][1]) * inches_per_pixel  # Flip Y coordinate
-                    points.append((x, y))
+                    
+                    # Apply rotation around the center of the image
+                    center_x = image.shape[1] * inches_per_pixel / 2
+                    center_y = image.shape[0] * inches_per_pixel / 2
+                    
+                    # Translate to origin, rotate, then translate back
+                    x_centered = x - center_x
+                    y_centered = y - center_y
+                    
+                    x_rotated = x_centered * np.cos(rotation_angle) - y_centered * np.sin(rotation_angle)
+                    y_rotated = x_centered * np.sin(rotation_angle) + y_centered * np.cos(rotation_angle)
+                    
+                    x_final = x_rotated + center_x
+                    y_final = y_rotated + center_y
+                    
+                    points.append((x_final, y_final))
                 
                 if len(points) > 2:
                     try:
