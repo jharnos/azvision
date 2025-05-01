@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
@@ -107,6 +107,9 @@ class CNCVisionApp:
         # Edge detection resolution control
         self.edge_scale = tk.DoubleVar(value=1.0)  # 1.0 = full resolution, 2.0 = double resolution
         
+        # Edge visualization color (BGR format)
+        self.edge_color = [0, 255, 0]  # Default green
+        
         # Background subtraction variables
         self.background_image = None
         self.background_edges = None
@@ -153,19 +156,16 @@ class CNCVisionApp:
         self.known_distance = tk.DoubleVar(value=1.0) 
 
     def create_preview_frame(self):
-        """Create the preview frame with three image displays"""
+        """Create the preview frame with two image displays"""
         self.preview_frame = tk.Frame(self.scrollable_frame, bd=2, relief=tk.GROOVE, bg=self.colors['secondary'])
         self.preview_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        self.preview_frame.grid_columnconfigure((0,1,2), weight=1)
+        self.preview_frame.grid_columnconfigure((0,1), weight=1)  # Two columns instead of three
 
         self.preview_label_original = tk.Label(self.preview_frame)
         self.preview_label_original.grid(row=0, column=0, padx=2, pady=2, sticky="nsew")
         
         self.preview_label_edges = tk.Label(self.preview_frame)
         self.preview_label_edges.grid(row=0, column=1, padx=2, pady=2, sticky="nsew")
-        
-        self.preview_label_mask = tk.Label(self.preview_frame)
-        self.preview_label_mask.grid(row=0, column=2, padx=2, pady=2, sticky="nsew")
 
     def create_settings_frame(self):
         """Create the settings frame with all control panels"""
@@ -400,6 +400,20 @@ class CNCVisionApp:
                       command=self.refresh_preview,
                       font=('Arial', 8)).grid(row=1, column=0, sticky="w", pady=2)
 
+        # Edge color picker
+        color_frame = tk.Frame(bg_frame, bg=self.colors['secondary'])
+        color_frame.grid(row=2, column=0, sticky="ew", pady=2)
+        color_frame.grid_columnconfigure(1, weight=1)
+
+        tk.Label(color_frame, text="Edge Color:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        
+        # Create clickable color preview
+        self.edge_color_preview = tk.Canvas(color_frame, width=20, height=20,
+                                          relief='solid', bd=1, bg='#00FF00',
+                                          cursor="hand2")  # Add hand cursor
+        self.edge_color_preview.grid(row=0, column=1, padx=5, sticky="w")
+        self.edge_color_preview.bind("<Button-1>", lambda e: self.pick_edge_color())
+
     def create_control_buttons(self):
         """Create the control buttons at the bottom of the window"""
         button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
@@ -446,8 +460,8 @@ class CNCVisionApp:
         
         # Update preview sizes if needed
         if hasattr(self, 'preview_frame'):
-            # Calculate new preview width (1/3 of canvas width for each preview)
-            new_width = max(100, event.width // 3 - 10)  # Minimum width of 100px
+            # Calculate new preview width (1/2 of canvas width for each preview)
+            new_width = max(100, event.width // 2 - 10)  # Minimum width of 100px
             if self.frame_buffer:
                 self.refresh_preview()
 
@@ -578,8 +592,8 @@ class CNCVisionApp:
             if canvas_width < 10:  # Not yet properly initialized
                 canvas_width = 900  # Default width
             
-            # Calculate preview width (1/3 of canvas width for each preview)
-            preview_width = max(100, (canvas_width // 3) - 10)
+            # Calculate preview width (1/2 of canvas width for each preview)
+            preview_width = max(100, (canvas_width // 2) - 10)
             
             # Calculate height maintaining aspect ratio
             aspect_ratio = frame.shape[0] / frame.shape[1]
@@ -590,19 +604,43 @@ class CNCVisionApp:
 
             # Process edges at higher resolution if needed
             if self.color_mode.get() and self.target_color is not None:
-                edges, mask = color_based_edge_detection(
-                    frame_resized, 
-                    self.target_color,
-                    tolerance_h=self.color_tolerance_h.get(),
-                    tolerance_s=self.color_tolerance_s.get(),
-                    tolerance_v=self.color_tolerance_v.get(),
-                    debug=False
-                )
+                # Process at higher resolution if scale > 1.0
+                if self.edge_scale.get() > 1.0:
+                    scale = self.edge_scale.get()
+                    h, w = frame.shape[:2]
+                    frame_highres = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                    edges, mask = color_based_edge_detection(
+                        frame_highres,
+                        self.target_color,
+                        tolerance_h=self.color_tolerance_h.get(),
+                        tolerance_s=self.color_tolerance_s.get(),
+                        tolerance_v=self.color_tolerance_v.get(),
+                        debug=False
+                    )
+                    # Scale down the edges for preview
+                    edges = cv2.resize(edges, (preview_width, preview_height), 
+                                     interpolation=cv2.INTER_AREA)
+                    mask = cv2.resize(mask, (preview_width, preview_height), 
+                                    interpolation=cv2.INTER_AREA)
+                else:
+                    edges, mask = color_based_edge_detection(
+                        frame_resized, 
+                        self.target_color,
+                        tolerance_h=self.color_tolerance_h.get(),
+                        tolerance_s=self.color_tolerance_s.get(),
+                        tolerance_v=self.color_tolerance_v.get(),
+                        debug=False
+                    )
                 
-                # Create visualization
+                # Create visualization with original frame
+                edges_colored = frame_resized.copy()
+                # Add edges with selected color
+                edges_colored[edges > 0] = self.edge_color
+                # Add semi-transparent color mask
                 mask_colored = np.zeros_like(frame_resized)
-                mask_colored[mask > 0] = [0, 255, 0]
-                mask_blend = cv2.addWeighted(frame_resized, 0.7, mask_colored, 0.3, 0)
+                mask_colored[mask > 0] = [0, 0, 255]  # Red for color mask
+                edges_colored = cv2.addWeighted(edges_colored, 1.0, mask_colored, 0.3, 0)
+                edges = edges_colored
                 
             else:
                 # Process at higher resolution if scale > 1.0
@@ -621,7 +659,7 @@ class CNCVisionApp:
                     
                     # Create visualization with original frame
                     edges_colored = frame_resized.copy()
-                    edges_colored[edges > 0] = [0, 255, 0]  # Green edges
+                    edges_colored[edges > 0] = self.edge_color  # Use selected color
                     edges = edges_colored
                 else:
                     gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
@@ -629,10 +667,8 @@ class CNCVisionApp:
                     edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
                     # Convert edges to colored visualization
                     edges_colored = frame_resized.copy()
-                    edges_colored[edges > 0] = [0, 255, 0]  # Green edges
+                    edges_colored[edges > 0] = self.edge_color  # Use selected color
                     edges = edges_colored
-                
-                mask_blend = frame_resized.copy()
 
             # Add scale indicator if calibrated
             if hasattr(self, 'calibration_points') and len(self.calibration_points) == 2:
@@ -653,7 +689,7 @@ class CNCVisionApp:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             # Update the GUI
-            self.update_gui_from_main_thread(frame_resized, edges, mask_blend)
+            self.update_gui_from_main_thread(frame_resized, edges, frame_resized)
 
         except Exception as e:
             print(f"Error in _get_dimensions_and_process: {e}")
@@ -671,40 +707,27 @@ class CNCVisionApp:
             # Schedule the next queue check
             self.master.after(10, self.check_queue)
 
-    def update_gui_from_main_thread(self, frame, edges, mask):
+    def update_gui_from_main_thread(self, frame, edges, _):
         """Update GUI elements from the main thread"""
         try:
-            # Handle frame
-            if len(frame.shape) == 2:  # If grayscale
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-            else:  # If already RGB/BGR
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Handle frame - ensure proper color space conversion
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_original = Image.fromarray(frame_rgb)
             imgtk_original = ImageTk.PhotoImage(image=img_original)
             
-            # Handle edges
+            # Handle edges - ensure proper color space conversion
             if len(edges.shape) == 2:  # If grayscale
                 edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
             else:  # If already RGB/BGR
-                edges_rgb = edges  # Already in RGB format
+                edges_rgb = cv2.cvtColor(edges, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
             img_edges = Image.fromarray(edges_rgb)
             imgtk_edges = ImageTk.PhotoImage(image=img_edges)
-            
-            # Handle mask
-            if len(mask.shape) == 2:  # If grayscale
-                mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
-            else:  # If already RGB/BGR
-                mask_rgb = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
-            img_mask = Image.fromarray(mask_rgb)
-            imgtk_mask = ImageTk.PhotoImage(image=img_mask)
             
             # Update the labels
             self.preview_label_original.imgtk = imgtk_original
             self.preview_label_original.configure(image=imgtk_original)
             self.preview_label_edges.imgtk = imgtk_edges
             self.preview_label_edges.configure(image=imgtk_edges)
-            self.preview_label_mask.imgtk = imgtk_mask
-            self.preview_label_mask.configure(image=imgtk_mask)
             
         except Exception as e:
             print(f"Error in update_gui_from_main_thread: {e}")
@@ -712,7 +735,6 @@ class CNCVisionApp:
             blank = np.zeros((100, 100, 3), dtype=np.uint8)
             self.preview_label_original.configure(image='')
             self.preview_label_edges.configure(image='')
-            self.preview_label_mask.configure(image='')
 
     def refresh_preview(self):
         """Refresh the preview display"""
@@ -1191,6 +1213,21 @@ class CNCVisionApp:
             print(f"Background capture error: {str(e)}")
             traceback.print_exc()
             messagebox.showerror("Background Capture Error", str(e))
+
+    def pick_edge_color(self):
+        """Open color picker for edge visualization color"""
+        # Open the color chooser dialog
+        color = colorchooser.askcolor(color='#00FF00', title="Choose Edge Color")
+        
+        if color[1]:  # If a color was selected (not cancelled)
+            # Convert hex color to BGR for OpenCV
+            hex_color = color[1].lstrip('#')
+            rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            self.edge_color = [rgb[2], rgb[1], rgb[0]]  # Convert RGB to BGR
+            
+            # Update preview
+            self.edge_color_preview.configure(bg=color[1])
+            self.refresh_preview()
 
     def check_current_camera_resolutions(self):
         """Check and display available resolutions for current camera"""
