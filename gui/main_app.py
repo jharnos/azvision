@@ -14,7 +14,7 @@ import ezdxf
 
 from calibration.calibration_window import CalibrationWindow
 from utils.image_utils import color_based_edge_detection, simplify_contour, normalize_image_safe
-from utils.camera_utils import list_ffmpeg_cameras, build_camera_index_map, get_camera_resolutions, get_latest_image, print_camera_parameters
+from utils.camera_utils import list_ffmpeg_cameras, build_camera_index_map, get_latest_image, print_camera_parameters
 
 class CNCVisionApp:
     def __init__(self, master):
@@ -102,7 +102,15 @@ class CNCVisionApp:
         self.inches_per_pixel = tk.DoubleVar(value=0.0604)
         self.canny_low = tk.IntVar(value=50)
         self.canny_high = tk.IntVar(value=150)
-        self.dxf_rotation = tk.DoubleVar(value=1.2)  # Default rotation of 1.2 degrees clockwise
+        self.dxf_rotation = tk.DoubleVar(value=-0.25)  # Default rotation of -0.25 degrees clockwise
+        
+        # Edge detection resolution control
+        self.edge_scale = tk.DoubleVar(value=1.0)  # 1.0 = full resolution, 2.0 = double resolution
+        
+        # Background subtraction variables
+        self.background_image = None
+        self.background_edges = None
+        self.use_background_subtraction = tk.BooleanVar(value=False)
         
         # Color detection variables
         self.color_mode = tk.BooleanVar(value=False)
@@ -187,7 +195,8 @@ class CNCVisionApp:
         self.create_color_detection_panel()
         self.create_exposure_controls()
         self.create_future_panel()
-        self.create_dxf_settings_panel()  # Add new panel for DXF settings
+        self.create_dxf_settings_panel()
+        self.create_background_subtraction_panel()  # Add new panel
 
     def create_edge_detection_panel(self):
         """Create the edge detection settings panel"""
@@ -201,15 +210,22 @@ class CNCVisionApp:
         tk.Label(canny_frame, text="Inches per Pixel:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
         tk.Entry(canny_frame, textvariable=self.inches_per_pixel, width=10).grid(row=1, column=0, sticky="ew", padx=2)
 
-        tk.Label(canny_frame, text="Lower Threshold", font=('Arial', 8)).grid(row=2, column=0, sticky="w")
+        tk.Label(canny_frame, text="Edge Detection Resolution:", font=('Arial', 8)).grid(row=2, column=0, sticky="w")
+        tk.Scale(canny_frame, from_=0.5, to=2.0, resolution=0.1, orient=tk.HORIZONTAL, 
+                 variable=self.edge_scale,
+                 command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
+        tk.Label(canny_frame, text="(1.0 = camera resolution, 2.0 = double resolution)", 
+                font=('Arial', 7)).grid(row=4, column=0, sticky="w")
+
+        tk.Label(canny_frame, text="Lower Threshold", font=('Arial', 8)).grid(row=5, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL, 
                  variable=self.canny_low,
-                 command=lambda _: self.refresh_preview()).grid(row=3, column=0, sticky="ew")
+                 command=lambda _: self.refresh_preview()).grid(row=6, column=0, sticky="ew")
 
-        tk.Label(canny_frame, text="Upper Threshold", font=('Arial', 8)).grid(row=4, column=0, sticky="w")
+        tk.Label(canny_frame, text="Upper Threshold", font=('Arial', 8)).grid(row=7, column=0, sticky="w")
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.canny_high,
-                 command=lambda _: self.refresh_preview()).grid(row=5, column=0, sticky="ew")
+                 command=lambda _: self.refresh_preview()).grid(row=8, column=0, sticky="ew")
 
     def create_camera_settings_panel(self):
         """Create the camera settings panel"""
@@ -230,14 +246,14 @@ class CNCVisionApp:
         self.camera_menu.configure(font=('Arial', 8))
 
         tk.Label(camera_grid, text="Resolution:", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
-        resolutions = ["640x480", "1280x720", "1920x1080", "2560x1440"]
+        resolutions = ["640x480", "1280x720", "1920x1080", "2560x1440", "3840x2160"]
         self.resolution_menu = tk.OptionMenu(camera_grid, self.selected_resolution, *resolutions,
                                            command=self.change_resolution)
         self.resolution_menu.grid(row=1, column=1, sticky="ew", padx=2)
         self.resolution_menu.configure(font=('Arial', 8))
 
         check_res_button = tk.Button(camera_frame, text="Check Available Resolutions",
-                                   command=lambda: self.check_current_camera_resolutions(),
+                                   command=self.check_current_camera_resolutions,
                                    font=('Arial', 8))
         check_res_button.grid(row=1, column=0, sticky="ew", pady=1)
 
@@ -364,6 +380,26 @@ class CNCVisionApp:
         tk.Label(dxf_frame, text="DXF Rotation (degrees):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
         tk.Entry(dxf_frame, textvariable=self.dxf_rotation, width=10).grid(row=1, column=0, sticky="ew", padx=2)
 
+    def create_background_subtraction_panel(self):
+        """Create the background subtraction settings panel"""
+        bg_frame = tk.LabelFrame(self.future_column, text="Background Subtraction", 
+                               **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
+                                  'font': ('Arial', 8, 'bold')})
+        bg_frame.grid(row=1, column=0, sticky="ew", pady=1)
+        bg_frame.grid_columnconfigure(0, weight=1)
+
+        # Background capture button
+        tk.Button(bg_frame, text="Capture Background",
+                 command=self.capture_background,
+                 **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
+                    'font': ('Arial', 8), 'padx': 5, 'pady': 2}).grid(row=0, column=0, sticky="ew", pady=2)
+
+        # Toggle for background subtraction
+        tk.Checkbutton(bg_frame, text="Use Background Subtraction",
+                      variable=self.use_background_subtraction,
+                      command=self.refresh_preview,
+                      font=('Arial', 8)).grid(row=1, column=0, sticky="w", pady=2)
+
     def create_control_buttons(self):
         """Create the control buttons at the bottom of the window"""
         button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
@@ -437,8 +473,25 @@ class CNCVisionApp:
 
     def change_resolution(self, selection):
         """Handle resolution change"""
-        self.resolution_label.config(text=f"Capture resolution: {selection.replace('x', ' x ')}")
-        self.open_live_preview()
+        try:
+            width, height = map(int, selection.split('x'))
+            if self.cap is not None and self.cap.isOpened():
+                # Set new resolution
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                
+                # Verify the resolution was set
+                actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                
+                print(f"Resolution change requested: {width}x{height}")
+                print(f"Actual camera resolution: {actual_width}x{actual_height}")
+                
+                # Restart preview with new resolution
+                self.open_live_preview()
+        except Exception as e:
+            print(f"Error changing resolution: {e}")
+            messagebox.showerror("Resolution Error", f"Failed to change resolution: {e}")
 
     def change_camera(self, selection):
         """Handle camera change"""
@@ -458,9 +511,20 @@ class CNCVisionApp:
         if target_index is not None:
             cap = cv2.VideoCapture(target_index, cv2.CAP_DSHOW)
             if cap.isOpened():
+                # Get the selected resolution
                 width, height = self.get_resolution_tuple()
+                
+                # Set the resolution
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                
+                # Verify the resolution was set
+                actual_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                actual_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                
+                print(f"Opening camera with resolution: {width}x{height}")
+                print(f"Actual camera resolution: {actual_width}x{actual_height}")
+                
                 self.cap = cap
                 
                 # Apply initial camera settings
@@ -470,7 +534,7 @@ class CNCVisionApp:
                 self.preview_thread = threading.Thread(target=self.buffered_preview)
                 self.preview_thread.daemon = True
                 self.preview_thread.start()
-                self.status_label.config(text=f"Live preview: {target_camera_name}")
+                self.status_label.config(text=f"Live preview: {target_camera_name} ({actual_width}x{actual_height})")
             else:
                 self.status_label.config(text=f"Failed to open live preview for: {target_camera_name}")
         else:
@@ -521,9 +585,10 @@ class CNCVisionApp:
             aspect_ratio = frame.shape[0] / frame.shape[1]
             preview_height = int(preview_width * aspect_ratio)
             
-            # Resize frame
+            # Resize frame for preview
             frame_resized = cv2.resize(frame, (preview_width, preview_height))
 
+            # Process edges at higher resolution if needed
             if self.color_mode.get() and self.target_color is not None:
                 edges, mask = color_based_edge_detection(
                     frame_resized, 
@@ -540,18 +605,42 @@ class CNCVisionApp:
                 mask_blend = cv2.addWeighted(frame_resized, 0.7, mask_colored, 0.3, 0)
                 
             else:
-                gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
-                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-                edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                # Process at higher resolution if scale > 1.0
+                if self.edge_scale.get() > 1.0:
+                    # Scale up the frame for edge detection
+                    scale = self.edge_scale.get()
+                    h, w = frame.shape[:2]
+                    frame_highres = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                    gray = cv2.cvtColor(frame_highres, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                    
+                    # Scale down the edges for preview
+                    edges = cv2.resize(edges, (preview_width, preview_height), 
+                                     interpolation=cv2.INTER_AREA)
+                    
+                    # Create visualization with original frame
+                    edges_colored = frame_resized.copy()
+                    edges_colored[edges > 0] = [0, 255, 0]  # Green edges
+                    edges = edges_colored
+                else:
+                    gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                    # Convert edges to colored visualization
+                    edges_colored = frame_resized.copy()
+                    edges_colored[edges > 0] = [0, 255, 0]  # Green edges
+                    edges = edges_colored
+                
                 mask_blend = frame_resized.copy()
 
             # Add scale indicator if calibrated
             if hasattr(self, 'calibration_points') and len(self.calibration_points) == 2:
                 cv2.line(frame_resized, 
-                        (int(self.calibration_points[0][0] * preview_width/width), 
-                         int(self.calibration_points[0][1] * preview_height/height)),
-                        (int(self.calibration_points[1][0] * preview_width/width), 
-                         int(self.calibration_points[1][1] * preview_height/height)),
+                        (int(self.calibration_points[0][0] * preview_width/w), 
+                         int(self.calibration_points[0][1] * preview_height/h)),
+                        (int(self.calibration_points[1][0] * preview_width/w), 
+                         int(self.calibration_points[1][1] * preview_height/h)),
                         (0, 255, 0), 2)
                 
                 # Add distance label
@@ -559,8 +648,8 @@ class CNCVisionApp:
                 mid_y = (self.calibration_points[0][1] + self.calibration_points[1][1]) // 2
                 cv2.putText(frame_resized, 
                            f"{self.known_distance.get():.2f}\"",
-                           (int(mid_x * preview_width/width), 
-                            int(mid_y * preview_height/height)),
+                           (int(mid_x * preview_width/w), 
+                            int(mid_y * preview_height/h)),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             # Update the GUI
@@ -778,6 +867,13 @@ class CNCVisionApp:
             image_normalized = cv2.normalize(image_float, None, 0, 255, cv2.NORM_MINMAX)
             image = image_normalized.astype(np.uint8)
             
+            # Process at higher resolution if scale > 1.0
+            if self.edge_scale.get() > 1.0:
+                scale = self.edge_scale.get()
+                h, w = image.shape[:2]
+                image = cv2.resize(image, (int(w * scale), int(h * scale)))
+                print(f"Processing at {w * scale}x{h * scale} resolution")
+            
             if self.color_mode.get() and self.target_color is not None:
                 edges, mask = color_based_edge_detection(
                     image,
@@ -797,13 +893,40 @@ class CNCVisionApp:
                 # Create binary threshold from edges
                 thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)[1]
 
+            # Apply background subtraction if enabled
+            if self.use_background_subtraction.get() and self.background_edges is not None:
+                # Save original edges for debug
+                cv2.imwrite("debug_original_edges.png", thresh)
+                cv2.imwrite("debug_background_edges.png", self.background_edges)
+                
+                # Subtract background edges from current edges
+                thresh = cv2.subtract(thresh, self.background_edges)
+                
+                # Ensure we don't have negative values
+                thresh = cv2.threshold(thresh, 0, 255, cv2.THRESH_BINARY)[1]
+                
+                # Save debug image of subtracted result
+                cv2.imwrite("debug_subtracted_edges.png", thresh)
+                
+                print("Background subtraction applied:")
+                print(f"Original edges pixels: {np.count_nonzero(thresh)}")
+                print(f"Background edges pixels: {np.count_nonzero(self.background_edges)}")
+                print(f"Subtracted edges pixels: {np.count_nonzero(thresh)}")
+
             # Save debug images
             cv2.imwrite("thresh_debug.png", thresh)
             cv2.imwrite("edges_debug.png", edges)
 
-            # Find contours
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            print(f"Contours found: {len(contours)}")
+            # Find contours with different methods to ensure we don't miss any
+            contours_external, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours_tree, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Combine contours from both methods
+            all_contours = contours_external + contours_tree
+            
+            print(f"Contours found (External): {len(contours_external)}")
+            print(f"Contours found (Tree): {len(contours_tree)}")
+            print(f"Total unique contours: {len(all_contours)}")
 
             # Create new DXF document with inches as units
             doc = ezdxf.new(setup=True)
@@ -820,26 +943,29 @@ class CNCVisionApp:
             # Get rotation angle in radians
             rotation_angle = np.radians(self.dxf_rotation.get())
             
-            for i, contour in enumerate(contours):
+            # Debug image to visualize contours
+            debug_contours = image.copy()
+            
+            for i, contour in enumerate(all_contours):
                 # Process larger contours with more detail
                 area = cv2.contourArea(contour)
-                if area < 3:  # Reduced minimum area
+                if area < 1:  # Reduced minimum area to catch more edges
                     continue
                 
                 # Calculate tolerance based on contour size
                 if area > 1000:
-                    tolerance = 0.3  # More detail for large contours
+                    tolerance = 0.2  # More detail for large contours
                 elif area > 100:
-                    tolerance = 0.4
+                    tolerance = 0.3
                 else:
-                    tolerance = 0.5  # Still detailed for small contours
+                    tolerance = 0.4  # More detail for small contours
                 
                 # Simplify while preserving more points
                 simplified = simplify_contour(contour, tolerance=tolerance)
                 
-                # Debug: Print points for first contour
-                if i == 0:
-                    print(f"\nFirst contour debug:")
+                # Debug: Print points for first few contours
+                if i < 3:
+                    print(f"\nContour {i} debug:")
                     print(f"Contour area: {area:.2f} pixels")
                     print(f"Number of points before simplification: {len(contour)}")
                     print(f"Number of points after simplification: {len(simplified)}")
@@ -853,6 +979,9 @@ class CNCVisionApp:
                         print(f"Point {j}:")
                         print(f"  Original: ({orig_x:.2f}, {orig_y:.2f})")
                         print(f"  Scaled: ({scaled_x:.2f}, {scaled_y:.2f})")
+                
+                # Draw contour on debug image
+                cv2.drawContours(debug_contours, [contour], -1, (0, 255, 0), 1)
                 
                 # Convert points, flip Y coordinates, and apply rotation
                 points = []
@@ -884,6 +1013,9 @@ class CNCVisionApp:
                     except Exception as e:
                         print(f"Failed to add polyline: {e}")
 
+            # Save debug image with contours
+            cv2.imwrite("debug_contours.png", debug_contours)
+            
             print(f"Valid contours processed: {valid_contours}")
 
             output_path = filedialog.asksaveasfilename(defaultextension=".dxf", 
@@ -997,4 +1129,85 @@ class CNCVisionApp:
             
         except Exception as e:
             print(f"Error updating color selection: {e}")
-            messagebox.showerror("Error", f"Failed to update color selection: {e}") 
+            messagebox.showerror("Error", f"Failed to update color selection: {e}")
+
+    def capture_background(self):
+        """Capture and process the background image"""
+        if self.cap is None or not self.cap.isOpened():
+            messagebox.showerror("Error", "Camera is not initialized")
+            return
+
+        try:
+            # Capture multiple frames for averaging
+            num_frames = 10
+            frames = []
+            edges_list = []
+            
+            print(f"Capturing {num_frames} frames for background...")
+            self.status_label.config(text=f"Capturing background...")
+            
+            for i in range(num_frames):
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    raise Exception("Failed to capture frame")
+                
+                frames.append(frame.copy())
+                
+                # Process edges for this frame
+                if self.color_mode.get() and self.target_color is not None:
+                    edges, _ = color_based_edge_detection(
+                        frame,
+                        self.target_color,
+                        tolerance_h=self.color_tolerance_h.get(),
+                        tolerance_s=self.color_tolerance_s.get(),
+                        tolerance_v=self.color_tolerance_v.get(),
+                        debug=False
+                    )
+                else:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                
+                edges_list.append(edges)
+                time.sleep(0.05)
+            
+            # Average the frames
+            self.background_image = np.mean(frames, axis=0).astype(np.uint8)
+            
+            # Combine edges using bitwise OR
+            self.background_edges = np.zeros_like(edges_list[0])
+            for edges in edges_list:
+                self.background_edges = cv2.bitwise_or(self.background_edges, edges)
+            
+            # Save debug images
+            cv2.imwrite("debug_background.png", self.background_image)
+            cv2.imwrite("debug_background_edges.png", self.background_edges)
+            
+            self.status_label.config(text="Background captured successfully")
+            self.use_background_subtraction.set(True)
+            self.refresh_preview()
+            
+        except Exception as e:
+            print(f"Background capture error: {str(e)}")
+            traceback.print_exc()
+            messagebox.showerror("Background Capture Error", str(e))
+
+    def check_current_camera_resolutions(self):
+        """Check and display available resolutions for current camera"""
+        if self.cap is not None and self.cap.isOpened():
+            try:
+                # Get current resolution
+                actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                
+                # Get selected resolution
+                selected_width, selected_height = self.get_resolution_tuple()
+                
+                messagebox.showinfo("Current Resolution", 
+                                  f"Selected resolution: {selected_width}x{selected_height}\n"
+                                  f"Actual camera resolution: {actual_width}x{actual_height}")
+            except Exception as e:
+                print(f"Error checking resolution: {e}")
+                messagebox.showerror("Error", f"Failed to check resolution: {e}")
+        else:
+            messagebox.showwarning("Warning", "Camera must be initialized first") 
