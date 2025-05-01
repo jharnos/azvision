@@ -878,179 +878,218 @@ class CNCVisionApp:
             messagebox.showerror("Error", "Inches per pixel must be greater than 0.")
             return
 
-        try:
-            image = cv2.imread(self.image_path)
-            print(f"\nDXF Export Debug:")
-            print(f"Current inches_per_pixel: {inches_per_pixel:.6f}")
-            print(f"Image dimensions: {image.shape[1]}x{image.shape[0]} pixels")
-            
-            # Normalize the image to improve contrast
-            image_float = image.astype(np.float32)
-            image_normalized = cv2.normalize(image_float, None, 0, 255, cv2.NORM_MINMAX)
-            image = image_normalized.astype(np.uint8)
-            
-            # Process at higher resolution if scale > 1.0
-            if self.edge_scale.get() > 1.0:
-                scale = self.edge_scale.get()
-                h, w = image.shape[:2]
-                image = cv2.resize(image, (int(w * scale), int(h * scale)))
-                print(f"Processing at {w * scale}x{h * scale} resolution")
-            
-            if self.color_mode.get() and self.target_color is not None:
-                edges, mask = color_based_edge_detection(
-                    image,
-                    self.target_color,
-                    tolerance_h=self.color_tolerance_h.get(),
-                    tolerance_s=self.color_tolerance_s.get(),
-                    tolerance_v=self.color_tolerance_v.get(),
-                    debug=True
-                )
-                # Create binary threshold from mask
-                thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
-            else:
-                # Normal Canny edge detection with improved contrast
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-                edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
-                # Create binary threshold from edges
-                thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)[1]
+        # Create progress window
+        progress_window = tk.Toplevel(self.master)
+        progress_window.title("Processing")
+        progress_window.transient(self.master)
+        progress_window.grab_set()
+        
+        # Center the progress window
+        progress_window.geometry("300x100")
+        x = self.master.winfo_x() + (self.master.winfo_width() - 300) // 2
+        y = self.master.winfo_y() + (self.master.winfo_height() - 100) // 2
+        progress_window.geometry(f"+{x}+{y}")
+        
+        # Add progress label
+        progress_label = tk.Label(progress_window, text="Processing image and generating DXF...", 
+                                font=('Arial', 10))
+        progress_label.pack(pady=20)
+        
+        # Add progress bar
+        progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
+        progress_bar.pack(fill=tk.X, padx=20, pady=10)
+        progress_bar.start()
 
-            # Apply background subtraction if enabled
-            if self.use_background_subtraction.get() and self.background_edges is not None:
-                # Save original edges for debug
-                cv2.imwrite("debug_original_edges.png", thresh)
-                cv2.imwrite("debug_background_edges.png", self.background_edges)
+        def process_in_thread():
+            try:
+                image = cv2.imread(self.image_path)
+                print(f"\nDXF Export Debug:")
+                print(f"Current inches_per_pixel: {inches_per_pixel:.6f}")
+                print(f"Image dimensions: {image.shape[1]}x{image.shape[0]} pixels")
                 
-                # Subtract background edges from current edges
-                thresh = cv2.subtract(thresh, self.background_edges)
+                # Normalize the image to improve contrast
+                image_float = image.astype(np.float32)
+                image_normalized = cv2.normalize(image_float, None, 0, 255, cv2.NORM_MINMAX)
+                image = image_normalized.astype(np.uint8)
                 
-                # Ensure we don't have negative values
-                thresh = cv2.threshold(thresh, 0, 255, cv2.THRESH_BINARY)[1]
+                # Process at higher resolution if scale > 1.0
+                if self.edge_scale.get() > 1.0:
+                    scale = self.edge_scale.get()
+                    h, w = image.shape[:2]
+                    image = cv2.resize(image, (int(w * scale), int(h * scale)))
+                    print(f"Processing at {w * scale}x{h * scale} resolution")
                 
-                # Save debug image of subtracted result
-                cv2.imwrite("debug_subtracted_edges.png", thresh)
-                
-                print("Background subtraction applied:")
-                print(f"Original edges pixels: {np.count_nonzero(thresh)}")
-                print(f"Background edges pixels: {np.count_nonzero(self.background_edges)}")
-                print(f"Subtracted edges pixels: {np.count_nonzero(thresh)}")
-
-            # Save debug images
-            cv2.imwrite("thresh_debug.png", thresh)
-            cv2.imwrite("edges_debug.png", edges)
-
-            # Find contours with different methods to ensure we don't miss any
-            contours_external, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            contours_tree, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            
-            # Combine contours from both methods
-            all_contours = contours_external + contours_tree
-            
-            print(f"Contours found (External): {len(contours_external)}")
-            print(f"Contours found (Tree): {len(contours_tree)}")
-            print(f"Total unique contours: {len(all_contours)}")
-
-            # Create new DXF document with inches as units
-            doc = ezdxf.new(setup=True)
-            # Set DXF units to inches
-            doc.header['$INSUNITS'] = 1      # 1 = Inches
-            doc.header['$LUNITS'] = 2        # 2 = Decimal
-            doc.header['$MEASUREMENT'] = 1   # 1 = English (inches)
-            msp = doc.modelspace()
-
-            # Get image height for vertical flipping
-            img_height = image.shape[0]
-            valid_contours = 0
-            
-            # Get rotation angle in radians
-            rotation_angle = np.radians(self.dxf_rotation.get())
-            
-            # Debug image to visualize contours
-            debug_contours = image.copy()
-            
-            for i, contour in enumerate(all_contours):
-                # Process larger contours with more detail
-                area = cv2.contourArea(contour)
-                if area < 1:  # Reduced minimum area to catch more edges
-                    continue
-                
-                # Calculate tolerance based on contour size
-                if area > 1000:
-                    tolerance = 0.2  # More detail for large contours
-                elif area > 100:
-                    tolerance = 0.3
+                if self.color_mode.get() and self.target_color is not None:
+                    edges, mask = color_based_edge_detection(
+                        image,
+                        self.target_color,
+                        tolerance_h=self.color_tolerance_h.get(),
+                        tolerance_s=self.color_tolerance_s.get(),
+                        tolerance_v=self.color_tolerance_v.get(),
+                        debug=True
+                    )
+                    # Create binary threshold from mask
+                    thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
                 else:
-                    tolerance = 0.4  # More detail for small contours
-                
-                # Simplify while preserving more points
-                simplified = simplify_contour(contour, tolerance=tolerance)
-                
-                # Debug: Print points for first few contours
-                if i < 3:
-                    print(f"\nContour {i} debug:")
-                    print(f"Contour area: {area:.2f} pixels")
-                    print(f"Number of points before simplification: {len(contour)}")
-                    print(f"Number of points after simplification: {len(simplified)}")
-                    
-                    # Print first few points before and after scaling
-                    print("\nFirst few points:")
-                    for j in range(min(3, len(simplified))):
-                        orig_x, orig_y = simplified[j][0]
-                        scaled_x = orig_x * inches_per_pixel
-                        scaled_y = (img_height - orig_y) * inches_per_pixel
-                        print(f"Point {j}:")
-                        print(f"  Original: ({orig_x:.2f}, {orig_y:.2f})")
-                        print(f"  Scaled: ({scaled_x:.2f}, {scaled_y:.2f})")
-                
-                # Draw contour on debug image
-                cv2.drawContours(debug_contours, [contour], -1, (0, 255, 0), 1)
-                
-                # Convert points, flip Y coordinates, and apply rotation
-                points = []
-                for pt in simplified:
-                    x = pt[0][0] * inches_per_pixel
-                    y = (img_height - pt[0][1]) * inches_per_pixel  # Flip Y coordinate
-                    
-                    # Apply rotation around the center of the image
-                    center_x = image.shape[1] * inches_per_pixel / 2
-                    center_y = image.shape[0] * inches_per_pixel / 2
-                    
-                    # Translate to origin, rotate, then translate back
-                    x_centered = x - center_x
-                    y_centered = y - center_y
-                    
-                    x_rotated = x_centered * np.cos(rotation_angle) - y_centered * np.sin(rotation_angle)
-                    y_rotated = x_centered * np.sin(rotation_angle) + y_centered * np.cos(rotation_angle)
-                    
-                    x_final = x_rotated + center_x
-                    y_final = y_rotated + center_y
-                    
-                    points.append((x_final, y_final))
-                
-                if len(points) > 2:
-                    try:
-                        msp.add_lwpolyline(points, close=True)
-                        valid_contours += 1
-                        print(f"Added polyline {valid_contours} with {len(points)} points")
-                    except Exception as e:
-                        print(f"Failed to add polyline: {e}")
+                    # Normal Canny edge detection with improved contrast
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    edges = cv2.Canny(blurred, self.canny_low.get(), self.canny_high.get())
+                    # Create binary threshold from edges
+                    thresh = cv2.threshold(edges, 127, 255, cv2.THRESH_BINARY)[1]
 
-            # Save debug image with contours
-            cv2.imwrite("debug_contours.png", debug_contours)
-            
-            print(f"Valid contours processed: {valid_contours}")
+                # Apply background subtraction if enabled
+                if self.use_background_subtraction.get() and self.background_edges is not None:
+                    # Save original edges for debug
+                    cv2.imwrite("debug_original_edges.png", thresh)
+                    cv2.imwrite("debug_background_edges.png", self.background_edges)
+                    
+                    # Subtract background edges from current edges
+                    thresh = cv2.subtract(thresh, self.background_edges)
+                    
+                    # Ensure we don't have negative values
+                    thresh = cv2.threshold(thresh, 0, 255, cv2.THRESH_BINARY)[1]
+                    
+                    # Save debug image of subtracted result
+                    cv2.imwrite("debug_subtracted_edges.png", thresh)
+                    
+                    print("Background subtraction applied:")
+                    print(f"Original edges pixels: {np.count_nonzero(thresh)}")
+                    print(f"Background edges pixels: {np.count_nonzero(self.background_edges)}")
+                    print(f"Subtracted edges pixels: {np.count_nonzero(thresh)}")
 
+                # Save debug images
+                cv2.imwrite("thresh_debug.png", thresh)
+                cv2.imwrite("edges_debug.png", edges)
+
+                # Find contours with different methods to ensure we don't miss any
+                contours_external, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours_tree, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Combine contours from both methods
+                all_contours = contours_external + contours_tree
+                
+                print(f"Contours found (External): {len(contours_external)}")
+                print(f"Contours found (Tree): {len(contours_tree)}")
+                print(f"Total unique contours: {len(all_contours)}")
+
+                # Create new DXF document with inches as units
+                doc = ezdxf.new(setup=True)
+                # Set DXF units to inches
+                doc.header['$INSUNITS'] = 1      # 1 = Inches
+                doc.header['$LUNITS'] = 2        # 2 = Decimal
+                doc.header['$MEASUREMENT'] = 1   # 1 = English (inches)
+                msp = doc.modelspace()
+
+                # Get image height for vertical flipping
+                img_height = image.shape[0]
+                valid_contours = 0
+                
+                # Get rotation angle in radians
+                rotation_angle = np.radians(self.dxf_rotation.get())
+                
+                # Debug image to visualize contours
+                debug_contours = image.copy()
+                
+                for i, contour in enumerate(all_contours):
+                    # Process larger contours with more detail
+                    area = cv2.contourArea(contour)
+                    if area < 1:  # Reduced minimum area to catch more edges
+                        continue
+                    
+                    # Calculate tolerance based on contour size
+                    if area > 1000:
+                        tolerance = 0.2  # More detail for large contours
+                    elif area > 100:
+                        tolerance = 0.3
+                    else:
+                        tolerance = 0.4  # More detail for small contours
+                    
+                    # Simplify while preserving more points
+                    simplified = simplify_contour(contour, tolerance=tolerance)
+                    
+                    # Debug: Print points for first few contours
+                    if i < 3:
+                        print(f"\nContour {i} debug:")
+                        print(f"Contour area: {area:.2f} pixels")
+                        print(f"Number of points before simplification: {len(contour)}")
+                        print(f"Number of points after simplification: {len(simplified)}")
+                        
+                        # Print first few points before and after scaling
+                        print("\nFirst few points:")
+                        for j in range(min(3, len(simplified))):
+                            orig_x, orig_y = simplified[j][0]
+                            scaled_x = orig_x * inches_per_pixel
+                            scaled_y = (img_height - orig_y) * inches_per_pixel
+                            print(f"Point {j}:")
+                            print(f"  Original: ({orig_x:.2f}, {orig_y:.2f})")
+                            print(f"  Scaled: ({scaled_x:.2f}, {scaled_y:.2f})")
+                    
+                    # Draw contour on debug image
+                    cv2.drawContours(debug_contours, [contour], -1, (0, 255, 0), 1)
+                    
+                    # Convert points, flip Y coordinates, and apply rotation
+                    points = []
+                    for pt in simplified:
+                        x = pt[0][0] * inches_per_pixel
+                        y = (img_height - pt[0][1]) * inches_per_pixel  # Flip Y coordinate
+                        
+                        # Apply rotation around the center of the image
+                        center_x = image.shape[1] * inches_per_pixel / 2
+                        center_y = image.shape[0] * inches_per_pixel / 2
+                        
+                        # Translate to origin, rotate, then translate back
+                        x_centered = x - center_x
+                        y_centered = y - center_y
+                        
+                        x_rotated = x_centered * np.cos(rotation_angle) - y_centered * np.sin(rotation_angle)
+                        y_rotated = x_centered * np.sin(rotation_angle) + y_centered * np.cos(rotation_angle)
+                        
+                        x_final = x_rotated + center_x
+                        y_final = y_rotated + center_y
+                        
+                        points.append((x_final, y_final))
+                    
+                    if len(points) > 2:
+                        try:
+                            msp.add_lwpolyline(points, close=True)
+                            valid_contours += 1
+                            print(f"Added polyline {valid_contours} with {len(points)} points")
+                        except Exception as e:
+                            print(f"Failed to add polyline: {e}")
+
+                # Save debug image with contours
+                cv2.imwrite("debug_contours.png", debug_contours)
+                
+                print(f"Valid contours processed: {valid_contours}")
+
+                # Close progress window and show file dialog in main thread
+                progress_window.destroy()
+                
+                # Use after_idle to ensure the progress window is closed before showing the file dialog
+                self.master.after_idle(lambda: self._show_save_dialog(doc, valid_contours))
+
+            except Exception as e:
+                print(f"Error in process_image: {str(e)}")
+                traceback.print_exc()
+                progress_window.destroy()
+                messagebox.showerror("Processing Error", str(e))
+
+        # Start processing in a separate thread
+        threading.Thread(target=process_in_thread, daemon=True).start()
+
+    def _show_save_dialog(self, doc, valid_contours):
+        """Show the save dialog and save the DXF file"""
+        try:
             output_path = filedialog.asksaveasfilename(defaultextension=".dxf", 
                                                       filetypes=[("DXF files", "*.dxf")])
             if output_path:
                 doc.saveas(output_path)
                 messagebox.showinfo("Success", f"DXF saved to: {output_path}")
                 self.status_label.config(text=f"DXF export complete. {valid_contours} contours processed.")
-
         except Exception as e:
-            print(f"Error in process_image: {str(e)}")
-            traceback.print_exc()
-            messagebox.showerror("Processing Error", str(e))
+            print(f"Error saving DXF: {str(e)}")
+            messagebox.showerror("Save Error", str(e))
 
     def pick_color(self):
         """Open color picker window"""
