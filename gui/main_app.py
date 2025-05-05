@@ -104,6 +104,17 @@ class CNCVisionApp:
         self.canny_high = tk.IntVar(value=150)
         self.dxf_rotation = tk.DoubleVar(value=-0.25)  # Default rotation of -0.25 degrees clockwise
         
+        # Reference point variables
+        self.reference_point = (956, 539)  # Default reference point in image coordinates
+        self.reference_table_x = tk.DoubleVar(value=72.63324)  # Default X coordinate on CNC table in inches
+        self.reference_table_y = tk.DoubleVar(value=30.54024)  # Default Y coordinate on CNC table in inches
+        self.use_reference_point = tk.BooleanVar(value=True)  # Enable reference point by default
+        
+        # Table boundary box variables
+        self.add_table_boundary = tk.BooleanVar(value=True)  # Enable table boundary box by default
+        self.table_width = tk.DoubleVar(value=144.0)  # Table width in inches
+        self.table_height = tk.DoubleVar(value=61.0)  # Table height in inches
+        
         # Edge detection resolution control
         self.edge_scale = tk.DoubleVar(value=1.0)  # 1.0 = full resolution, 2.0 = double resolution
         
@@ -379,6 +390,52 @@ class CNCVisionApp:
         # Rotation adjustment
         tk.Label(dxf_frame, text="DXF Rotation (degrees):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
         tk.Entry(dxf_frame, textvariable=self.dxf_rotation, width=10).grid(row=1, column=0, sticky="ew", padx=2)
+
+        # Reference point settings
+        ref_frame = tk.Frame(dxf_frame, bg=self.colors['secondary'])
+        ref_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        ref_frame.grid_columnconfigure(0, weight=1)
+
+        tk.Checkbutton(ref_frame, text="Use Reference Point",
+                      variable=self.use_reference_point,
+                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=2)
+
+        # Table coordinates
+        coord_frame = tk.Frame(ref_frame, bg=self.colors['secondary'])
+        coord_frame.grid(row=1, column=0, sticky="ew", pady=2)
+        coord_frame.grid_columnconfigure((0,1), weight=1)
+
+        tk.Label(coord_frame, text="Table X (inches):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        tk.Entry(coord_frame, textvariable=self.reference_table_x, width=8).grid(row=0, column=1, sticky="ew", padx=2)
+
+        tk.Label(coord_frame, text="Table Y (inches):", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
+        tk.Entry(coord_frame, textvariable=self.reference_table_y, width=8).grid(row=1, column=1, sticky="ew", padx=2)
+
+        # Set reference point button
+        tk.Button(ref_frame, text="Set Reference Point",
+                 command=self.set_reference_point,
+                 **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
+                    'font': ('Arial', 8), 'padx': 5, 'pady': 2}).grid(row=2, column=0, sticky="ew", pady=2)
+
+        # Table boundary box settings
+        boundary_frame = tk.Frame(dxf_frame, bg=self.colors['secondary'])
+        boundary_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        boundary_frame.grid_columnconfigure(0, weight=1)
+
+        tk.Checkbutton(boundary_frame, text="Add Table Boundary Box",
+                      variable=self.add_table_boundary,
+                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=2)
+
+        # Table dimensions
+        dim_frame = tk.Frame(boundary_frame, bg=self.colors['secondary'])
+        dim_frame.grid(row=1, column=0, sticky="ew", pady=2)
+        dim_frame.grid_columnconfigure((0,1), weight=1)
+
+        tk.Label(dim_frame, text="Table Width (inches):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        tk.Entry(dim_frame, textvariable=self.table_width, width=8).grid(row=0, column=1, sticky="ew", padx=2)
+
+        tk.Label(dim_frame, text="Table Height (inches):", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
+        tk.Entry(dim_frame, textvariable=self.table_height, width=8).grid(row=1, column=1, sticky="ew", padx=2)
 
     def create_background_subtraction_panel(self):
         """Create the background subtraction settings panel"""
@@ -991,6 +1048,62 @@ class CNCVisionApp:
                 # Debug image to visualize contours
                 debug_contours = image.copy()
                 
+                # Calculate reference point translation if enabled
+                ref_translation = (0.0, 0.0)
+                if self.use_reference_point.get() and self.reference_point is not None:
+                    ref_x, ref_y = self.reference_point
+                    ref_table_x, ref_table_y = self.reference_table_x.get(), self.reference_table_y.get()
+                    
+                    # Calculate translation needed to move reference point to table coordinates
+                    # This will shift the detected features relative to the fixed boundary box
+                    ref_translation = (
+                        ref_table_x - (ref_x * inches_per_pixel),
+                        ref_table_y - ((img_height - ref_y) * inches_per_pixel)
+                    )
+                    
+                    # Draw reference point on debug image
+                    cv2.circle(debug_contours, (ref_x, ref_y), 5, (0, 0, 255), -1)
+                    cv2.putText(debug_contours, f"Ref: ({ref_table_x:.1f}, {ref_table_y:.1f})",
+                              (ref_x + 10, ref_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+                # Add table boundary box if enabled
+                if self.add_table_boundary.get():
+                    table_width = self.table_width.get()
+                    table_height = self.table_height.get()
+                    
+                    # Fixed boundary box at (0,0) to (width,height)
+                    # Ensure exact dimensions by using float values
+                    corners = [
+                        (0.0, 0.0),  # Bottom left
+                        (float(table_width), 0.0),  # Bottom right
+                        (float(table_width), float(table_height)),  # Top right
+                        (0.0, float(table_height)),  # Top left
+                    ]
+                    
+                    # Add the boundary box to the DXF
+                    msp.add_lwpolyline(corners, close=True)
+                    
+                    # Draw boundary box on debug image
+                    # Convert DXF coordinates back to image coordinates for visualization
+                    debug_corners = []
+                    for x, y in corners:
+                        if self.use_reference_point.get():
+                            # Convert from DXF space to image space, accounting for reference point
+                            img_x = int((x - ref_translation[0]) / inches_per_pixel)
+                            img_y = int(img_height - (y - ref_translation[1]) / inches_per_pixel)
+                        else:
+                            # If no reference point, just convert from DXF space to image space
+                            img_x = int(x / inches_per_pixel)
+                            img_y = int(img_height - y / inches_per_pixel)
+                        debug_corners.append((img_x, img_y))
+                    
+                    # Draw the boundary box on the debug image
+                    for i in range(len(debug_corners)):
+                        cv2.line(debug_contours, 
+                                debug_corners[i], 
+                                debug_corners[(i + 1) % len(debug_corners)], 
+                                (255, 0, 0), 2)
+                
                 for i, contour in enumerate(all_contours):
                     # Process larger contours with more detail
                     area = cv2.contourArea(contour)
@@ -1048,8 +1161,20 @@ class CNCVisionApp:
                         x_final = x_rotated + center_x
                         y_final = y_rotated + center_y
                         
-                        points.append((x_final, y_final))
+                        # Apply reference point translation if enabled
+                        if self.use_reference_point.get():
+                            x_final += ref_translation[0]
+                            y_final += ref_translation[1]
+                        
+                        # Check if point is within boundary box
+                        if self.add_table_boundary.get():
+                            if (0.0 <= x_final <= float(table_width) and 
+                                0.0 <= y_final <= float(table_height)):
+                                points.append((x_final, y_final))
+                        else:
+                            points.append((x_final, y_final))
                     
+                    # Only add the polyline if we have enough points and at least some points are within bounds
                     if len(points) > 2:
                         try:
                             msp.add_lwpolyline(points, close=True)
@@ -1286,4 +1411,187 @@ class CNCVisionApp:
                 print(f"Error checking resolution: {e}")
                 messagebox.showerror("Error", f"Failed to check resolution: {e}")
         else:
-            messagebox.showwarning("Warning", "Camera must be initialized first") 
+            messagebox.showwarning("Warning", "Camera must be initialized first")
+
+    def set_reference_point(self):
+        """Set the reference point"""
+        if not self.frame_buffer:
+            messagebox.showerror("Error", "No image available")
+            return
+
+        # Get the latest frame and resize for preview
+        frame = self.frame_buffer[-1].copy()
+        height, width = frame.shape[:2]
+        
+        # Create a larger preview window
+        preview_width = min(1200, width)  # Increased from 800 to 1200
+        preview_height = int(preview_width * (height / width))
+        
+        preview_frame = cv2.resize(frame, (preview_width, preview_height))
+        preview_image = Image.fromarray(cv2.cvtColor(preview_frame, cv2.COLOR_BGR2RGB))
+        imgtk = ImageTk.PhotoImage(preview_image)
+
+        # Create a Toplevel window for reference point selection
+        picker_win = tk.Toplevel(self.master)
+        picker_win.title("Set Reference Point")
+        picker_win.resizable(False, False)
+
+        # Add instructions
+        instructions = tk.Label(picker_win, 
+                              text="Click on the image to set the reference point.\nThis point will be used to align the DXF with your CNC table coordinates.",
+                              font=('Arial', 10))
+        instructions.pack(pady=10)
+
+        # Create canvas for the image with scrollbars
+        canvas_frame = tk.Frame(picker_win)
+        canvas_frame.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
+        
+        # Add scrollbars
+        h_scrollbar = tk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        v_scrollbar = tk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+        
+        canvas = tk.Canvas(canvas_frame, 
+                          width=preview_width, 
+                          height=preview_height,
+                          xscrollcommand=h_scrollbar.set,
+                          yscrollcommand=v_scrollbar.set)
+        
+        h_scrollbar.config(command=canvas.xview)
+        v_scrollbar.config(command=canvas.yview)
+        
+        # Grid layout for canvas and scrollbars
+        canvas.grid(row=0, column=0, sticky="nsew")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        canvas_frame.grid_columnconfigure(0, weight=1)
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        
+        canvas.imgtk = imgtk  # Keep a reference!
+        canvas.create_image(0, 0, anchor="nw", image=imgtk)
+
+        # Draw crosshair on mouse move
+        crosshair = None
+        selected_point = None
+        zoom_rect = None
+        zoom_factor = 3.0  # Increased zoom factor for better visibility
+        zoom_size = 30  # Reduced zoom area size for more precise selection
+
+        def on_mouse_move(event):
+            nonlocal crosshair, zoom_rect
+            canvas.delete("crosshair")
+            canvas.delete("zoom")
+            
+            # Get canvas coordinates
+            x = canvas.canvasx(event.x)
+            y = canvas.canvasy(event.y)
+            
+            # Draw crosshair
+            crosshair = canvas.create_line(x, 0, x, preview_height, fill="red", width=1, tags="crosshair")
+            canvas.create_line(0, y, preview_width, y, fill="red", width=1, tags="crosshair")
+            canvas.create_oval(x-2, y-2, x+2, y+2, outline="red", width=1, tags="crosshair")  # Smaller crosshair dot
+            
+            # Create zoomed view
+            if 0 <= x < preview_width and 0 <= y < preview_height:
+                # Calculate zoom region
+                x1 = max(0, int(x - zoom_size))
+                y1 = max(0, int(y - zoom_size))
+                x2 = min(preview_width, int(x + zoom_size))
+                y2 = min(preview_height, int(y + zoom_size))
+                
+                # Get the region from the original image
+                region = preview_frame[y1:y2, x1:x2]
+                if region.size > 0:
+                    # Resize the region for zoom
+                    zoomed = cv2.resize(region, None, fx=zoom_factor, fy=zoom_factor)
+                    zoomed_rgb = cv2.cvtColor(zoomed, cv2.COLOR_BGR2RGB)
+                    zoomed_img = Image.fromarray(zoomed_rgb)
+                    zoomed_tk = ImageTk.PhotoImage(zoomed_img)
+                    
+                    # Draw zoomed view
+                    zoom_x = min(x + 20, preview_width - zoomed.shape[1])
+                    zoom_y = min(y + 20, preview_height - zoomed.shape[0])
+                    zoom_rect = canvas.create_image(zoom_x, zoom_y, 
+                                                  image=zoomed_tk, 
+                                                  anchor="nw", 
+                                                  tags="zoom")
+                    canvas.zoomed_tk = zoomed_tk  # Keep reference
+                    
+                    # Draw crosshair on zoomed view
+                    zoom_center_x = zoom_x + (x - x1) * zoom_factor
+                    zoom_center_y = zoom_y + (y - y1) * zoom_factor
+                    canvas.create_line(zoom_center_x, zoom_y, zoom_center_x, zoom_y + zoomed.shape[0], 
+                                     fill="red", width=1, tags="zoom")
+                    canvas.create_line(zoom_x, zoom_center_y, zoom_x + zoomed.shape[1], zoom_center_y, 
+                                     fill="red", width=1, tags="zoom")
+                    canvas.create_oval(zoom_center_x-1, zoom_center_y-1, zoom_center_x+1, zoom_center_y+1, 
+                                     fill="red", tags="zoom")  # Smaller zoom crosshair dot
+
+        def on_mouse_click(event):
+            nonlocal selected_point
+            # Get canvas coordinates
+            x = canvas.canvasx(event.x)
+            y = canvas.canvasy(event.y)
+            
+            # Map coordinates back to original frame
+            orig_x = int(x * (width / preview_width))
+            orig_y = int(y * (height / preview_height))
+            selected_point = (orig_x, orig_y)
+            
+            # Draw permanent marker at selected point
+            canvas.delete("marker")
+            canvas.create_oval(x-2, y-2, x+2, y+2,  # Smaller selection dot
+                             fill="red", outline="red", tags="marker")
+            
+            # Add coordinates label
+            canvas.create_text(x + 15, y - 15,
+                             text=f"({orig_x}, {orig_y})",
+                             fill="red", font=('Arial', 10), tags="marker")
+
+        def on_confirm():
+            if selected_point:
+                self.reference_point = selected_point
+                self.use_reference_point.set(True)
+                self.refresh_preview()
+                self.status_label.config(text=f"Reference point set: ({selected_point[0]}, {selected_point[1]})")
+            picker_win.destroy()
+
+        def on_cancel():
+            picker_win.destroy()
+
+        # Bind mouse events
+        canvas.bind("<Motion>", on_mouse_move)
+        canvas.bind("<Button-1>", on_mouse_click)
+
+        # Add buttons
+        button_frame = tk.Frame(picker_win)
+        button_frame.pack(pady=10)
+        
+        tk.Button(button_frame, text="Confirm", command=on_confirm,
+                 **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
+                    'font': ('Arial', 10), 'padx': 10, 'pady': 5}).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Cancel", command=on_cancel,
+                 **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
+                    'font': ('Arial', 10), 'padx': 10, 'pady': 5}).pack(side=tk.LEFT, padx=5)
+
+        # Make window modal
+        picker_win.transient(self.master)
+        picker_win.grab_set()
+        self.master.wait_window(picker_win)
+
+    def get_reference_point(self):
+        """Get the reference point"""
+        return self.reference_point
+
+    def get_reference_table_coordinates(self):
+        """Get the reference table coordinates"""
+        return (self.reference_table_x.get(), self.reference_table_y.get())
+
+    def get_reference_point_status(self):
+        """Get the reference point status"""
+        return self.use_reference_point.get()
+
+    def get_reference_point_status_str(self):
+        """Get the reference point status as a string"""
+        return "Enabled" if self.use_reference_point.get() else "Disabled" 
