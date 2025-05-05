@@ -185,9 +185,9 @@ class CNCVisionApp:
 
         # Make sure the settings frame uses full width
         self.scrollable_frame.grid_columnconfigure(0, weight=1)
-        settings_frame.grid_columnconfigure((0,1,2), weight=1, uniform='equal')
+        settings_frame.grid_columnconfigure((0,1,2,3), weight=1, uniform='equal')  # Four columns now
 
-        # Create three columns
+        # Create four columns
         self.left_column = tk.Frame(settings_frame, bg=self.colors['main'])
         self.left_column.grid(row=0, column=0, sticky="nsew", padx=1)
         self.left_column.grid_columnconfigure(0, weight=1)
@@ -196,8 +196,12 @@ class CNCVisionApp:
         self.right_column.grid(row=0, column=1, sticky="nsew", padx=1)
         self.right_column.grid_columnconfigure(0, weight=1)
 
+        self.dxf_column = tk.Frame(settings_frame, bg=self.colors['main'])
+        self.dxf_column.grid(row=0, column=2, sticky="nsew", padx=1)
+        self.dxf_column.grid_columnconfigure(0, weight=1)
+
         self.future_column = tk.Frame(settings_frame, bg=self.colors['main'])
-        self.future_column.grid(row=0, column=2, sticky="nsew", padx=1)
+        self.future_column.grid(row=0, column=3, sticky="nsew", padx=1)
         self.future_column.grid_columnconfigure(0, weight=1)
 
         # Create the control panels
@@ -207,7 +211,6 @@ class CNCVisionApp:
         self.create_exposure_controls()
         self.create_future_panel()
         self.create_dxf_settings_panel()
-        self.create_background_subtraction_panel()  # Add new panel
 
     def create_edge_detection_panel(self):
         """Create the edge detection settings panel"""
@@ -237,6 +240,20 @@ class CNCVisionApp:
         tk.Scale(canny_frame, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.canny_high,
                  command=lambda _: self.refresh_preview()).grid(row=8, column=0, sticky="ew")
+
+        # Add edge color picker
+        color_frame = tk.Frame(canny_frame, bg=self.colors['secondary'])
+        color_frame.grid(row=9, column=0, sticky="ew", pady=2)
+        color_frame.grid_columnconfigure(1, weight=1)
+
+        tk.Label(color_frame, text="Edge Color:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
+        
+        # Create clickable color preview
+        self.edge_color_preview = tk.Canvas(color_frame, width=20, height=20,
+                                          relief='solid', bd=1, bg='#00FF00',
+                                          cursor="hand2")  # Add hand cursor
+        self.edge_color_preview.grid(row=0, column=1, padx=5, sticky="w")
+        self.edge_color_preview.bind("<Button-1>", lambda e: self.pick_edge_color())
 
     def create_camera_settings_panel(self):
         """Create the camera settings panel"""
@@ -381,7 +398,7 @@ class CNCVisionApp:
 
     def create_dxf_settings_panel(self):
         """Create the DXF settings panel"""
-        dxf_frame = tk.LabelFrame(self.future_column, text="DXF Settings", 
+        dxf_frame = tk.LabelFrame(self.dxf_column, text="DXF Settings", 
                                 **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
                                    'font': ('Arial', 8, 'bold')})
         dxf_frame.grid(row=0, column=0, sticky="ew", pady=1)
@@ -389,57 +406,56 @@ class CNCVisionApp:
 
         # Rotation adjustment
         tk.Label(dxf_frame, text="DXF Rotation (degrees):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
-        tk.Entry(dxf_frame, textvariable=self.dxf_rotation, width=10).grid(row=1, column=0, sticky="ew", padx=2)
+        tk.Entry(dxf_frame, textvariable=self.dxf_rotation, width=8).grid(row=1, column=0, sticky="ew", padx=2)
 
         # Reference point settings
         ref_frame = tk.Frame(dxf_frame, bg=self.colors['secondary'])
-        ref_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        ref_frame.grid(row=2, column=0, sticky="ew", pady=2)
         ref_frame.grid_columnconfigure(0, weight=1)
 
         tk.Checkbutton(ref_frame, text="Use Reference Point",
                       variable=self.use_reference_point,
-                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=2)
+                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=1)
 
         # Table coordinates
         coord_frame = tk.Frame(ref_frame, bg=self.colors['secondary'])
-        coord_frame.grid(row=1, column=0, sticky="ew", pady=2)
+        coord_frame.grid(row=1, column=0, sticky="ew", pady=1)
         coord_frame.grid_columnconfigure((0,1), weight=1)
 
         tk.Label(coord_frame, text="Table X (inches):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
-        tk.Entry(coord_frame, textvariable=self.reference_table_x, width=8).grid(row=0, column=1, sticky="ew", padx=2)
+        tk.Entry(coord_frame, textvariable=self.reference_table_x, width=6).grid(row=0, column=1, sticky="ew", padx=1)
 
         tk.Label(coord_frame, text="Table Y (inches):", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
-        tk.Entry(coord_frame, textvariable=self.reference_table_y, width=8).grid(row=1, column=1, sticky="ew", padx=2)
+        tk.Entry(coord_frame, textvariable=self.reference_table_y, width=6).grid(row=1, column=1, sticky="ew", padx=1)
 
         # Set reference point button
         tk.Button(ref_frame, text="Set Reference Point",
                  command=self.set_reference_point,
                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
-                    'font': ('Arial', 8), 'padx': 5, 'pady': 2}).grid(row=2, column=0, sticky="ew", pady=2)
+                    'font': ('Arial', 8), 'padx': 3, 'pady': 1}).grid(row=2, column=0, sticky="ew", pady=1)
 
         # Table boundary box settings
         boundary_frame = tk.Frame(dxf_frame, bg=self.colors['secondary'])
-        boundary_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        boundary_frame.grid(row=3, column=0, sticky="ew", pady=2)
         boundary_frame.grid_columnconfigure(0, weight=1)
 
         tk.Checkbutton(boundary_frame, text="Add Table Boundary Box",
                       variable=self.add_table_boundary,
-                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=2)
+                      font=('Arial', 8)).grid(row=0, column=0, sticky="w", pady=1)
 
         # Table dimensions
         dim_frame = tk.Frame(boundary_frame, bg=self.colors['secondary'])
-        dim_frame.grid(row=1, column=0, sticky="ew", pady=2)
+        dim_frame.grid(row=1, column=0, sticky="ew", pady=1)
         dim_frame.grid_columnconfigure((0,1), weight=1)
 
         tk.Label(dim_frame, text="Table Width (inches):", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
-        tk.Entry(dim_frame, textvariable=self.table_width, width=8).grid(row=0, column=1, sticky="ew", padx=2)
+        tk.Entry(dim_frame, textvariable=self.table_width, width=6).grid(row=0, column=1, sticky="ew", padx=1)
 
         tk.Label(dim_frame, text="Table Height (inches):", font=('Arial', 8)).grid(row=1, column=0, sticky="w")
-        tk.Entry(dim_frame, textvariable=self.table_height, width=8).grid(row=1, column=1, sticky="ew", padx=2)
+        tk.Entry(dim_frame, textvariable=self.table_height, width=6).grid(row=1, column=1, sticky="ew", padx=1)
 
-    def create_background_subtraction_panel(self):
-        """Create the background subtraction settings panel"""
-        bg_frame = tk.LabelFrame(self.future_column, text="Background Subtraction", 
+        # Add background subtraction panel right after DXF settings
+        bg_frame = tk.LabelFrame(self.dxf_column, text="Background Subtraction", 
                                **{'bg': self.colors['secondary'], 'fg': self.colors['text'], 
                                   'font': ('Arial', 8, 'bold')})
         bg_frame.grid(row=1, column=0, sticky="ew", pady=1)
@@ -449,33 +465,19 @@ class CNCVisionApp:
         tk.Button(bg_frame, text="Capture Background",
                  command=self.capture_background,
                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
-                    'font': ('Arial', 8), 'padx': 5, 'pady': 2}).grid(row=0, column=0, sticky="ew", pady=2)
+                    'font': ('Arial', 8), 'padx': 3, 'pady': 1}).grid(row=0, column=0, sticky="ew", pady=1)
 
         # Toggle for background subtraction
         tk.Checkbutton(bg_frame, text="Use Background Subtraction",
                       variable=self.use_background_subtraction,
                       command=self.refresh_preview,
-                      font=('Arial', 8)).grid(row=1, column=0, sticky="w", pady=2)
-
-        # Edge color picker
-        color_frame = tk.Frame(bg_frame, bg=self.colors['secondary'])
-        color_frame.grid(row=2, column=0, sticky="ew", pady=2)
-        color_frame.grid_columnconfigure(1, weight=1)
-
-        tk.Label(color_frame, text="Edge Color:", font=('Arial', 8)).grid(row=0, column=0, sticky="w")
-        
-        # Create clickable color preview
-        self.edge_color_preview = tk.Canvas(color_frame, width=20, height=20,
-                                          relief='solid', bd=1, bg='#00FF00',
-                                          cursor="hand2")  # Add hand cursor
-        self.edge_color_preview.grid(row=0, column=1, padx=5, sticky="w")
-        self.edge_color_preview.bind("<Button-1>", lambda e: self.pick_edge_color())
+                      font=('Arial', 8)).grid(row=1, column=0, sticky="w", pady=1)
 
     def create_control_buttons(self):
         """Create the control buttons at the bottom of the window"""
         button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
         button_frame.grid(row=2, column=0, sticky="ew", pady=2)
-        button_frame.grid_columnconfigure((0,1,2,3), weight=1)  # Four columns for four buttons
+        button_frame.grid_columnconfigure((0,1,2), weight=1)  # Three columns for three buttons
         
         tk.Button(button_frame, text="Capture Latest Image",
                   command=self.capture_image, 
@@ -487,19 +489,21 @@ class CNCVisionApp:
                   **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
                      'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=1, padx=2, sticky="ew")
 
-        tk.Button(button_frame, text="Camera Calibration",
-                  command=self.open_calibration_window,
-                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
-
         tk.Button(button_frame, text="Generate Simplified DXF",
                   command=self.process_image, 
                   **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=3, padx=2, sticky="ew")
+                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
+
+        # Add camera calibration button to the left column
+        calibration_button = tk.Button(self.left_column, text="Camera Calibration",
+                  command=self.open_calibration_window,
+                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
+                     'font': ('Arial', 8), 'padx': 5, 'pady': 2})
+        calibration_button.grid(row=2, column=0, sticky="ew", pady=2)  # Place it after inches per pixel
 
         # Status label
         self.status_label = tk.Label(self.scrollable_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
-        self.status_label.grid(row=3, column=0, pady=2) 
+        self.status_label.grid(row=3, column=0, pady=2)
 
     def _on_mousewheel(self, event):
         """Handle mousewheel scrolling"""
