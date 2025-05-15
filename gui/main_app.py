@@ -19,7 +19,7 @@ from utils.camera_utils import list_ffmpeg_cameras, build_camera_index_map, get_
 class CNCVisionApp:
     def __init__(self, master):
         self.master = master
-        master.title("AriZona Vision")
+        master.title("🌱 AriZona Vision")
         
         # Define color scheme
         self.colors = {
@@ -109,6 +109,7 @@ class CNCVisionApp:
         
         # Reference point variables
         self.reference_point = (956, 539)  # Default reference point in image coordinates
+        self.reference_point_resolution = (1920, 1080)  # Store the resolution when reference point was set
         self.reference_table_x = tk.DoubleVar(value=72.63324)  # Default X coordinate on CNC table in inches
         self.reference_table_y = tk.DoubleVar(value=30.54024)  # Default Y coordinate on CNC table in inches
         self.use_reference_point = tk.BooleanVar(value=True)  # Enable reference point by default
@@ -527,6 +528,9 @@ class CNCVisionApp:
         try:
             width, height = map(int, selection.split('x'))
             if self.cap is not None and self.cap.isOpened():
+                # Store old resolution for reference point scaling
+                old_width, old_height = self.reference_point_resolution
+                
                 # Set new resolution
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -537,6 +541,26 @@ class CNCVisionApp:
                 
                 print(f"Resolution change requested: {width}x{height}")
                 print(f"Actual camera resolution: {actual_width}x{actual_height}")
+                
+                # Scale inches_per_pixel based on resolution change
+                old_scale = self.inches_per_pixel.get()
+                width_ratio = actual_width / old_width
+                height_ratio = actual_height / old_height
+                # Use the average of width and height ratios to maintain aspect ratio
+                scale_ratio = (width_ratio + height_ratio) / 2
+                new_scale = old_scale / scale_ratio
+                self.inches_per_pixel.set(new_scale)
+                print(f"Scaled inches_per_pixel from {old_scale:.6f} to {new_scale:.6f}")
+                
+                # Update reference point if it exists
+                if hasattr(self, 'reference_point') and self.reference_point is not None:
+                    old_x, old_y = self.reference_point
+                    # Scale reference point to new resolution
+                    new_x = int(old_x * (actual_width / old_width))
+                    new_y = int(old_y * (actual_height / old_height))
+                    self.reference_point = (new_x, new_y)
+                    self.reference_point_resolution = (actual_width, actual_height)
+                    print(f"Reference point scaled from ({old_x}, {old_y}) to ({new_x}, {new_y})")
                 
                 # Restart preview with new resolution
                 self.open_live_preview()
@@ -600,14 +624,11 @@ class CNCVisionApp:
 
     def buffered_preview(self):
         """Run the buffered preview loop"""
-        print("\nStarting buffered preview")
         while self.preview_running and self.cap:
             try:
                 ret, frame = self.cap.read()
                 if ret:
-                    print(f"Frame captured: {frame.shape}")
                     self.frame_buffer.append(frame.copy())
-                    print(f"Frame buffer length: {len(self.frame_buffer)}")
                     if self.frame_buffer:
                         frame_to_process = self.frame_buffer[-1].copy()
                         self.process_and_queue_gui_update(frame_to_process)
@@ -1423,6 +1444,9 @@ class CNCVisionApp:
         frame = self.frame_buffer[-1].copy()
         height, width = frame.shape[:2]
         
+        # Store current resolution
+        self.reference_point_resolution = (width, height)
+        
         # Create a larger preview window
         preview_width = min(1200, width)  # Increased from 800 to 1200
         preview_height = int(preview_width * (height / width))
@@ -1612,9 +1636,15 @@ class CNCVisionApp:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
         
-        # Calibration menu (renamed from Settings)
+        # Calibration menu
         calibration_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Calibration", menu=calibration_menu)
         
         # Add menu items to Calibration menu
         calibration_menu.add_command(label="Camera Calibration", command=self.open_calibration_window)
+        calibration_menu.add_command(label="Distortion Compensation", command=self.open_distortion_window)
+
+    def open_distortion_window(self):
+        """Open the distortion compensation window"""
+        # TODO: Implement distortion compensation window
+        messagebox.showinfo("Coming Soon", "Distortion compensation feature will be available in a future update.")
