@@ -33,6 +33,9 @@ class CNCVisionApp:
         # Set the background color for the main window
         master.configure(bg=self.colors['main'])
         
+        # Create menu bar
+        self.create_menu_bar()
+        
         # Create a main frame to hold everything
         main_frame = tk.Frame(master, bg=self.colors['main'])
         main_frame.grid(row=0, column=0, sticky="nsew")
@@ -315,13 +318,12 @@ class CNCVisionApp:
                    textvariable=self.color_sample_radius,
                    font=('Arial', 8)).grid(row=0, column=1, padx=1)
 
+        # Create clickable color preview with hand cursor
         self.color_preview = tk.Canvas(picker_frame, width=20, height=20,
-                                     relief='solid', bd=1, bg='#808080')
+                                     relief='solid', bd=1, bg='#808080',
+                                     cursor="hand2")  # Add hand cursor
         self.color_preview.grid(row=0, column=2, padx=1)
-
-        tk.Button(picker_frame, text="Pick",
-                  command=self.pick_color,
-                  font=('Arial', 8)).grid(row=0, column=3)
+        self.color_preview.bind("<Button-1>", lambda e: self.pick_color())  # Make canvas clickable
 
         # Color tolerance controls
         tolerance_frame = tk.Frame(color_frame, bg=self.colors['secondary'])
@@ -474,36 +476,10 @@ class CNCVisionApp:
                       font=('Arial', 8)).grid(row=1, column=0, sticky="w", pady=1)
 
     def create_control_buttons(self):
-        """Create the control buttons at the bottom of the window"""
-        button_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
-        button_frame.grid(row=2, column=0, sticky="ew", pady=2)
-        button_frame.grid_columnconfigure((0,1,2), weight=1)  # Three columns for three buttons
-        
-        tk.Button(button_frame, text="Capture Latest Image",
-                  command=self.capture_image, 
-                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=0, padx=2, sticky="ew")
-
-        tk.Button(button_frame, text="Auto-Load Latest Capture",
-                  command=self.load_latest_capture, 
-                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=1, padx=2, sticky="ew")
-
-        tk.Button(button_frame, text="Generate Simplified DXF",
-                  command=self.process_image, 
-                  **{'bg': self.colors['accent2'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 10), 'padx': 10, 'pady': 5}).grid(row=0, column=2, padx=2, sticky="ew")
-
-        # Add camera calibration button to the left column
-        calibration_button = tk.Button(self.left_column, text="Camera Calibration",
-                  command=self.open_calibration_window,
-                  **{'bg': self.colors['accent1'], 'fg': 'white', 'relief': tk.RAISED, 
-                     'font': ('Arial', 8), 'padx': 5, 'pady': 2})
-        calibration_button.grid(row=2, column=0, sticky="ew", pady=2)  # Place it after inches per pixel
-
+        """Create the status label at the bottom of the window"""
         # Status label
         self.status_label = tk.Label(self.scrollable_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
-        self.status_label.grid(row=3, column=0, pady=2)
+        self.status_label.grid(row=2, column=0, pady=2)
 
     def _on_mousewheel(self, event):
         """Handle mousewheel scrolling"""
@@ -1599,3 +1575,26 @@ class CNCVisionApp:
     def get_reference_point_status_str(self):
         """Get the reference point status as a string"""
         return "Enabled" if self.use_reference_point.get() else "Disabled" 
+
+    def create_menu_bar(self):
+        """Create the menu bar with all control options"""
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Add menu items to File menu
+        file_menu.add_command(label="Capture Latest Image", command=self.capture_image)
+        file_menu.add_command(label="Auto-Load Latest Capture", command=self.load_latest_capture)
+        file_menu.add_command(label="Generate Simplified DXF", command=self.process_image)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Settings menu
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+        
+        # Add menu items to Settings menu
+        settings_menu.add_command(label="Camera Calibration", command=self.open_calibration_window)
