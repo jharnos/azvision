@@ -600,17 +600,21 @@ class CNCVisionApp:
 
     def buffered_preview(self):
         """Run the buffered preview loop"""
+        print("\nStarting buffered preview")
         while self.preview_running and self.cap:
             try:
                 ret, frame = self.cap.read()
                 if ret:
+                    print(f"Frame captured: {frame.shape}")
                     self.frame_buffer.append(frame.copy())
+                    print(f"Frame buffer length: {len(self.frame_buffer)}")
                     if self.frame_buffer:
                         frame_to_process = self.frame_buffer[-1].copy()
                         self.process_and_queue_gui_update(frame_to_process)
                 time.sleep(0.03)
             except Exception as e:
                 print(f"Error in buffered_preview: {e}")
+                print(f"Traceback: {traceback.format_exc()}")
                 time.sleep(0.1)  # Add delay on error
 
     def process_and_queue_gui_update(self, frame):
@@ -812,11 +816,27 @@ class CNCVisionApp:
 
     def open_calibration_window(self):
         """Open the calibration window"""
-        if not self.frame_buffer:
-            messagebox.showerror("Error", "Camera preview must be running")
-            return
-        
-        CalibrationWindow(self.master, self.inches_per_pixel, self.on_calibration_complete)
+        try:
+            print("\nCalibration Window Debug:")
+            print(f"Frame buffer exists: {hasattr(self, 'frame_buffer')}")
+            if hasattr(self, 'frame_buffer'):
+                print(f"Frame buffer length: {len(self.frame_buffer) if self.frame_buffer else 0}")
+                print(f"Frame buffer type: {type(self.frame_buffer)}")
+                if self.frame_buffer:
+                    print(f"Latest frame shape: {self.frame_buffer[-1].shape if hasattr(self.frame_buffer[-1], 'shape') else 'No shape'}")
+            
+            if not self.frame_buffer:
+                messagebox.showerror("Error", "Camera preview must be running")
+                return
+            
+            print("Creating CalibrationWindow...")
+            CalibrationWindow(self, self.inches_per_pixel, self.on_calibration_complete)
+            print("CalibrationWindow created successfully")
+            
+        except Exception as e:
+            print(f"Error opening calibration window: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
+            messagebox.showerror("Error", f"Failed to open calibration window: {str(e)}")
 
     def on_calibration_complete(self, new_scale):
         """Handle calibration completion"""
@@ -1592,9 +1612,9 @@ class CNCVisionApp:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
         
-        # Settings menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
+        # Calibration menu (renamed from Settings)
+        calibration_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Calibration", menu=calibration_menu)
         
-        # Add menu items to Settings menu
-        settings_menu.add_command(label="Camera Calibration", command=self.open_calibration_window)
+        # Add menu items to Calibration menu
+        calibration_menu.add_command(label="Camera Calibration", command=self.open_calibration_window)

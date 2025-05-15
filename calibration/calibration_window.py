@@ -3,85 +3,113 @@ from tkinter import ttk, messagebox
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+import traceback
 
 class CalibrationWindow:
     def __init__(self, parent, inches_per_pixel, on_calibration_complete):
-        self.window = tk.Toplevel(parent)
-        self.window.title("Camera Calibration")
-        self.window.geometry("400x500")
-        
-        # Center the window on screen
-        self.window.geometry("+%d+%d" % (
-            parent.winfo_rootx() + 50,
-            parent.winfo_rooty() + 50))
-        
-        # Store parameters
-        self.parent = parent
-        self.inches_per_pixel = inches_per_pixel
-        self.on_calibration_complete = on_calibration_complete
-        self.calibration_points = []
-        self.picker_window = None
-        
-        # Main frame with padding
-        main_frame = ttk.Frame(self.window, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Current scale display
-        scale_frame = ttk.LabelFrame(main_frame, text="Current Scale", padding="5")
-        scale_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.scale_label = ttk.Label(scale_frame, 
-                                   text=f"1 pixel = {inches_per_pixel.get():.6f} inches")
-        self.scale_label.pack()
-        
-        # Calibration controls
-        cal_frame = ttk.LabelFrame(main_frame, text="New Calibration", padding="5")
-        cal_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Known distance input
-        dist_frame = ttk.Frame(cal_frame)
-        dist_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(dist_frame, text="Known Distance:").pack(side=tk.LEFT)
-        self.known_distance = tk.DoubleVar(value=1.0)
-        ttk.Entry(dist_frame, textvariable=self.known_distance, 
-                 width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(dist_frame, text="inches").pack(side=tk.LEFT)
-        
-        # Instructions
-        instruction_text = ("To calibrate:\n\n"
-                          "1. Place an object with a known dimension in the camera view\n"
-                          "2. Enter that dimension in inches above\n"
-                          "3. Click 'Start Measurement'\n"
-                          "4. Click the start and end points of your known dimension\n"
-                          "5. The scale will be automatically calculated")
-        
-        ttk.Label(cal_frame, text=instruction_text, 
-                 justify=tk.LEFT, wraplength=350).pack(pady=10)
-        
-        # Buttons
-        btn_frame = ttk.Frame(cal_frame)
-        btn_frame.pack(fill=tk.X, pady=5)
-        
-        ttk.Button(btn_frame, text="Start Measurement",
-                  command=self.start_calibration).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Reset to Default",
-                  command=self.reset_calibration).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Close",
-                  command=self.close_window).pack(side=tk.RIGHT, padx=5)
-        
-        # Status
-        self.status_label = ttk.Label(cal_frame, text="")
-        self.status_label.pack(pady=5)
-        
-        # Make window modal
-        self.window.transient(parent)
-        self.window.grab_set()
-        self.window.focus_set()
-        
-        # Bind window close event
-        self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+        try:
+            print("\nCalibrationWindow Initialization Debug:")
+            print(f"Parent type: {type(parent)}")
+            print(f"Parent has frame_buffer: {hasattr(parent, 'frame_buffer')}")
+            if hasattr(parent, 'frame_buffer'):
+                print(f"Frame buffer length: {len(parent.frame_buffer) if parent.frame_buffer else 0}")
+                if parent.frame_buffer:
+                    print(f"Latest frame shape: {parent.frame_buffer[-1].shape if hasattr(parent.frame_buffer[-1], 'shape') else 'No shape'}")
+            
+            # Create window with parent's master as the parent
+            self.window = tk.Toplevel(parent.master)
+            self.window.title("Camera Calibration")
+            self.window.geometry("400x500")
+            
+            # Center the window on screen
+            self.window.geometry("+%d+%d" % (
+                parent.master.winfo_rootx() + 50,
+                parent.master.winfo_rooty() + 50))
+            
+            # Store parameters
+            self.parent = parent
+            self.inches_per_pixel = inches_per_pixel
+            self.on_calibration_complete = on_calibration_complete
+            self.calibration_points = []
+            self.picker_window = None
+            
+            # Create main frame with padding
+            main_frame = ttk.Frame(self.window, padding="10")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Current scale display
+            scale_frame = ttk.LabelFrame(main_frame, text="Current Scale", padding="5")
+            scale_frame.pack(fill=tk.X, pady=(0, 10))
+            
+            self.scale_label = ttk.Label(scale_frame, 
+                                       text=f"1 pixel = {inches_per_pixel.get():.6f} inches")
+            self.scale_label.pack()
+            
+            # Calibration controls
+            cal_frame = ttk.LabelFrame(main_frame, text="New Calibration", padding="5")
+            cal_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Known distance input
+            dist_frame = ttk.Frame(cal_frame)
+            dist_frame.pack(fill=tk.X, pady=5)
+            ttk.Label(dist_frame, text="Known Distance:").pack(side=tk.LEFT)
+            self.known_distance = tk.DoubleVar(value=1.0)
+            ttk.Entry(dist_frame, textvariable=self.known_distance, 
+                     width=10).pack(side=tk.LEFT, padx=5)
+            ttk.Label(dist_frame, text="inches").pack(side=tk.LEFT)
+            
+            # Instructions
+            instruction_text = ("To calibrate:\n\n"
+                              "1. Place an object with a known dimension in the camera view\n"
+                              "2. Enter that dimension in inches above\n"
+                              "3. Click 'Start Measurement'\n"
+                              "4. Click the start and end points of your known dimension\n"
+                              "5. The scale will be automatically calculated")
+            
+            ttk.Label(cal_frame, text=instruction_text, 
+                     justify=tk.LEFT, wraplength=350).pack(pady=10)
+            
+            # Buttons
+            btn_frame = ttk.Frame(cal_frame)
+            btn_frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Button(btn_frame, text="Start Measurement",
+                      command=self.start_calibration).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_frame, text="Reset to Default",
+                      command=self.reset_calibration).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_frame, text="Close",
+                      command=self.close_window).pack(side=tk.RIGHT, padx=5)
+            
+            # Status
+            self.status_label = ttk.Label(cal_frame, text="")
+            self.status_label.pack(pady=5)
+            
+            # Make window modal
+            self.window.transient(parent.master)
+            self.window.grab_set()
+            self.window.focus_set()
+            
+            # Bind window close event
+            self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+            
+            print("CalibrationWindow initialization completed successfully")
+            
+        except Exception as e:
+            print(f"Error in CalibrationWindow initialization: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
+            raise  # Re-raise the exception to be caught by the caller
 
     def start_calibration(self):
+        """Start the calibration process"""
+        print("\nCalibration Debug:")
+        print(f"Parent type: {type(self.parent)}")
+        print(f"Has frame_buffer attribute: {hasattr(self.parent, 'frame_buffer')}")
+        if hasattr(self.parent, 'frame_buffer'):
+            print(f"Frame buffer length: {len(self.parent.frame_buffer) if self.parent.frame_buffer else 0}")
+            print(f"Frame buffer type: {type(self.parent.frame_buffer)}")
+            if self.parent.frame_buffer:
+                print(f"Latest frame shape: {self.parent.frame_buffer[-1].shape if hasattr(self.parent.frame_buffer[-1], 'shape') else 'No shape'}")
+        
         if not hasattr(self.parent, 'frame_buffer') or not self.parent.frame_buffer:
             messagebox.showerror("Error", "No camera feed available")
             return
@@ -89,14 +117,24 @@ class CalibrationWindow:
         self.show_calibration_picker()
 
     def show_calibration_picker(self):
+        """Show the calibration picker window"""
+        print("\nCalibration Picker Debug:")
+        print(f"Parent type: {type(self.parent)}")
+        print(f"Has frame_buffer attribute: {hasattr(self.parent, 'frame_buffer')}")
+        if hasattr(self.parent, 'frame_buffer'):
+            print(f"Frame buffer length: {len(self.parent.frame_buffer) if self.parent.frame_buffer else 0}")
+            if self.parent.frame_buffer:
+                print(f"Latest frame shape: {self.parent.frame_buffer[-1].shape if hasattr(self.parent.frame_buffer[-1], 'shape') else 'No shape'}")
+        
         if self.picker_window:
             try:
                 self.picker_window.close()
             except:
                 pass
         
-        # Create new picker window
-        self.picker_window = CalibrationPicker(self.window, 
+        # Create new picker window with the correct parent window and pass the app instance
+        self.picker_window = CalibrationPicker(self.window,  # Use self.window as parent
+                                             self.parent,    # Pass the app instance
                                              self.known_distance.get(),
                                              self.on_calibration_done)
         
@@ -132,7 +170,7 @@ class CalibrationWindow:
         self.window.destroy()
 
 class CalibrationPicker:
-    def __init__(self, parent, known_distance, callback):
+    def __init__(self, parent, app_instance, known_distance, callback):
         self.window = tk.Toplevel(parent)
         self.window.title("Measure Known Distance")
         
@@ -144,8 +182,8 @@ class CalibrationPicker:
         self.callback = callback
         self.points = []
         
-        # Get current frame from camera
-        frame = parent.frame_buffer[-1].copy()
+        # Get current frame from camera using the app instance
+        frame = app_instance.frame_buffer[-1].copy()
         height, width = frame.shape[:2]
         
         # Calculate preview size to be 80% of screen height while maintaining aspect ratio
