@@ -1,0 +1,50 @@
+{
+    "camera_settings": {
+        "selected_camera": "HP Wide Vision FHD Camera",
+        "selected_resolution": "1920x1080",
+        "inches_per_pixel": 0.0604,
+        "canny_low": 50,
+        "canny_high": 150,
+        "dxf_rotation": -0.25,
+        "edge_scale": 1.0,
+        "edge_color": [
+            0,
+            255,
+            0
+        ],
+        "auto_exposure": true,
+        "exposure": -5,
+        "brightness": 128,
+        "contrast": 128
+    },
+    "reference_settings": {
+        "reference_point": [
+            956,
+            539
+        ],
+        "reference_point_resolution": [
+            1920,
+            1080
+        ],
+        "reference_table_x": 72.63324,
+        "reference_table_y": 30.54024,
+        "use_reference_point": true
+    },
+    "table_settings": {
+        "add_table_boundary": true,
+        "table_width": 144.0,
+        "table_height": 61.0
+    },
+    "color_settings": {
+        "color_mode": false,
+        "target_color": null,
+        "color_tolerance_h": 15,
+        "color_tolerance_s": 100,
+        "color_tolerance_v": 100,
+        "color_sample_radius": 2
+    },
+    "calibration_settings": {
+        "calibration_points": [],
+        "known_distance": 1.0
+    }
+}
