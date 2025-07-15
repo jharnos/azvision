@@ -19,7 +19,12 @@ from utils.camera_utils import list_ffmpeg_cameras, build_camera_index_map, get_
 class CNCVisionApp:
     def __init__(self, master):
         self.master = master
-        master.title("🌱 AriZona Vision")
+        self.master.title("CNC Vision")
+        
+        # Add lens distortion parameters
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self.calibration_images = []
         
         # Define color scheme
         self.colors = {
@@ -478,9 +483,29 @@ class CNCVisionApp:
 
     def create_control_buttons(self):
         """Create the status label at the bottom of the window"""
+        # Create a frame for bottom controls
+        bottom_frame = tk.Frame(self.scrollable_frame, bg=self.colors['main'])
+        bottom_frame.grid(row=2, column=0, pady=2, sticky="ew")
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        
         # Status label
-        self.status_label = tk.Label(self.scrollable_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
-        self.status_label.grid(row=2, column=0, pady=2)
+        self.status_label = tk.Label(bottom_frame, text="", fg=self.colors['accent2'], font=('Arial', 10, 'italic'))
+        self.status_label.grid(row=0, column=0, pady=2, sticky="w")
+        
+        # Lens correction status indicator
+        lens_status_frame = tk.Frame(bottom_frame, bg=self.colors['main'])
+        lens_status_frame.grid(row=1, column=0, pady=2, sticky="w")
+        
+        tk.Label(lens_status_frame, text="Lens Correction:", font=('Arial', 9, 'bold'), 
+                bg=self.colors['main'], fg=self.colors['text']).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.lens_status_label = tk.Label(lens_status_frame, text="Disabled", 
+                                        font=('Arial', 9), bg=self.colors['main'], 
+                                        fg='red', relief=tk.SUNKEN, bd=1, padx=5, pady=2)
+        self.lens_status_label.pack(side=tk.LEFT)
+        
+        # Update the status initially
+        self.update_lens_status()
 
     def _on_mousewheel(self, event):
         """Handle mousewheel scrolling"""
@@ -981,6 +1006,10 @@ class CNCVisionApp:
         def process_in_thread():
             try:
                 image = cv2.imread(self.image_path)
+                
+                # Apply lens distortion correction if calibration is available
+                image = self.undistort_image(image)
+                
                 print(f"\nDXF Export Debug:")
                 print(f"Current inches_per_pixel: {inches_per_pixel:.6f}")
                 print(f"Image dimensions: {image.shape[1]}x{image.shape[0]} pixels")
@@ -1643,8 +1672,440 @@ class CNCVisionApp:
         # Add menu items to Calibration menu
         calibration_menu.add_command(label="Camera Calibration", command=self.open_calibration_window)
         calibration_menu.add_command(label="Distortion Compensation", command=self.open_distortion_window)
+        
+        # Lens Correction menu
+        lens_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Lens Correction", menu=lens_menu)
+        lens_menu.add_command(label="Calibrate Camera", command=self.calibrate_camera)
+        lens_menu.add_command(label="Save Calibration", command=self.save_calibration)
+        lens_menu.add_command(label="Load Calibration", command=self.load_calibration)
+        lens_menu.add_separator()
+        lens_menu.add_command(label="Reset Calibration", command=self.reset_calibration)
 
     def open_distortion_window(self):
         """Open the distortion compensation window"""
         # TODO: Implement distortion compensation window
         messagebox.showinfo("Coming Soon", "Distortion compensation feature will be available in a future update.")
+
+    def calibrate_camera(self):
+        """Start camera calibration process"""
+        if not self.cap or not self.cap.isOpened():
+            messagebox.showerror("Error", "Camera is not initialized")
+            return
+            
+        # Create calibration window
+        cal_window = tk.Toplevel(self.master)
+        cal_window.title("Camera Calibration")
+        cal_window.geometry("600x600")  # Made window taller to fit all elements
+        
+        # Create main container frame
+        main_frame = tk.Frame(cal_window)
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Add title
+        tk.Label(main_frame, text="Camera Calibration Instructions", font=('Arial', 12, 'bold')).pack(pady=(0, 20))
+        
+        # Create scrollable frame for instructions
+        canvas = tk.Canvas(main_frame, height=300)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Detailed instructions for ceiling-mounted camera
+        instructions = [
+            "1. Prepare the calibration pattern:",
+            "   • Print a checkerboard pattern (8x6 squares)",
+            "   • Each square should be about 1-2 inches",
+            "   • Mount on a rigid, flat surface",
+            "   • Pattern should be larger than your typical work pieces",
+            "",
+            "2. Place the pattern on your CNC table:",
+            "   • Start in the center of the table",
+            "   • Move to each corner of the table",
+            "   • Place at different distances from center",
+            "   • Try to cover the entire working area",
+            "",
+            "3. For each position:",
+            "   • Keep the pattern flat on the table",
+            "   • Ensure the entire pattern is visible",
+            "   • Make sure lighting is even",
+            "   • Avoid shadows on the pattern",
+            "   • Click 'Capture' when ready",
+            "",
+            "4. Capture at least 10 different positions",
+            "   • More positions = better calibration",
+            "   • Try to cover the entire table area",
+            "   • Include some positions near the edges",
+            "   • Avoid blurry or poorly lit captures"
+        ]
+        
+        for instruction in instructions:
+            tk.Label(scrollable_frame, text=instruction, justify=tk.LEFT, anchor='w').pack(anchor='w', pady=1)
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create button frame
+        button_frame = tk.Frame(main_frame)
+        button_frame.pack(fill='x', pady=20)
+        
+        # Add capture button
+        capture_btn = tk.Button(button_frame, text="Capture Calibration Image", 
+                              command=lambda: self.capture_calibration_image(cal_window),
+                              font=('Arial', 10), padx=20, pady=10)
+        capture_btn.pack(pady=10)
+        
+        # Add status label
+        status_label = tk.Label(button_frame, text="Images captured: 0", font=('Arial', 10))
+        status_label.pack(pady=10)
+        
+        # Add calibrate button
+        calibrate_btn = tk.Button(button_frame, text="Calculate Calibration", 
+                                command=lambda: self.calculate_calibration(cal_window),
+                                font=('Arial', 10), padx=20, pady=10)
+        calibrate_btn.pack(pady=10)
+        
+        # Store references
+        self.cal_window = cal_window
+        self.cal_status_label = status_label
+        self.calibration_images = []
+
+    def capture_calibration_image(self, cal_window):
+        """Capture an image for calibration"""
+        if not self.cap or not self.cap.isOpened():
+            messagebox.showerror("Error", "Camera is not initialized")
+            return
+            
+        ret, frame = self.cap.read()
+        if not ret:
+            messagebox.showerror("Error", "Failed to capture frame")
+            return
+            
+        # Create a debug window to show what the camera sees
+        debug_frame = frame.copy()
+        
+        # Try multiple detection methods with different pattern sizes
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Define different pattern sizes to try
+        pattern_sizes = [(8, 6), (6, 8), (7, 5), (5, 7), (9, 7), (7, 9)]
+        detection_flags = [
+            None,
+            cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK,
+            cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_NORMALIZE_IMAGE,
+            cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
+        ]
+        
+        ret = False
+        corners = None
+        successful_size = None
+        successful_flags = None
+        
+        # Try all combinations of pattern sizes and flags
+        for pattern_size in pattern_sizes:
+            for flags in detection_flags:
+                if flags is None:
+                    ret_temp, corners_temp = cv2.findChessboardCorners(gray, pattern_size)
+                else:
+                    ret_temp, corners_temp = cv2.findChessboardCorners(gray, pattern_size, flags)
+                
+                if ret_temp:
+                    ret = True
+                    corners = corners_temp
+                    successful_size = pattern_size
+                    successful_flags = flags
+                    break
+            if ret:
+                break
+        
+        # If still no detection, try with enhanced image
+        if not ret:
+            enhanced_gray = cv2.equalizeHist(gray)
+            for pattern_size in pattern_sizes:
+                for flags in detection_flags:
+                    if flags is None:
+                        ret_temp, corners_temp = cv2.findChessboardCorners(enhanced_gray, pattern_size)
+                    else:
+                        ret_temp, corners_temp = cv2.findChessboardCorners(enhanced_gray, pattern_size, flags)
+                    
+                    if ret_temp:
+                        ret = True
+                        corners = corners_temp
+                        successful_size = pattern_size
+                        successful_flags = flags
+                        gray = enhanced_gray  # Use enhanced image for refinement
+                        break
+                if ret:
+                    break
+        
+        # If still no detection, try with different preprocessing
+        if not ret:
+            # Try with Gaussian blur
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            for pattern_size in pattern_sizes:
+                for flags in detection_flags:
+                    if flags is None:
+                        ret_temp, corners_temp = cv2.findChessboardCorners(blurred, pattern_size)
+                    else:
+                        ret_temp, corners_temp = cv2.findChessboardCorners(blurred, pattern_size, flags)
+                    
+                    if ret_temp:
+                        ret = True
+                        corners = corners_temp
+                        successful_size = pattern_size
+                        successful_flags = flags
+                        gray = blurred
+                        break
+                if ret:
+                    break
+        
+        if ret:
+            # Refine corner positions
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+            corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            
+            # Check if this is a valid image for calibration
+            # Accept any pattern size that was successfully detected
+            expected_corners = successful_size[0] * successful_size[1]
+            actual_corners = corners_refined.shape[0]
+            is_valid = actual_corners == expected_corners
+            
+            # Draw corners
+            cv2.drawChessboardCorners(debug_frame, successful_size, corners_refined, ret)
+            
+            # Save the image and corners
+            self.calibration_images.append((frame.copy(), corners_refined))
+            
+            # Update status with validity information
+            # Count valid images based on the pattern size that was actually detected
+            valid_count = 0
+            for _, corners in self.calibration_images:
+                if corners.shape[0] == expected_corners:
+                    valid_count += 1
+            
+            total_count = len(self.calibration_images)
+            
+            status_text = f"Images captured: {total_count} (Valid: {valid_count})"
+            if valid_count < 5:
+                status_text += f" - Need at least 5 valid images"
+            elif valid_count >= 10:
+                status_text += " - Ready to calibrate!"
+            else:
+                status_text += f" - Need {5 - valid_count} more valid images"
+            
+            self.cal_status_label.config(text=status_text)
+            
+            # Add success message to debug frame
+            if is_valid:
+                cv2.putText(debug_frame, f"Pattern Found! Size: {successful_size} (VALID - {actual_corners} corners)", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                cv2.putText(debug_frame, f"Pattern Found! Size: {successful_size} (INVALID - Expected {expected_corners}, got {actual_corners})", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)  # Orange color for invalid
+        else:
+            # Add comprehensive debugging information
+            cv2.putText(debug_frame, "No Pattern Found", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+            # Add detailed debugging information
+            cv2.putText(debug_frame, f"Image size: {frame.shape[1]}x{frame.shape[0]}", (10, 70), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            # Calculate and show pattern size recommendations
+            img_area = frame.shape[0] * frame.shape[1]
+            min_pattern_area = img_area * 0.01  # Pattern should be at least 1% of image
+            max_pattern_area = img_area * 0.3   # Pattern should be at most 30% of image
+            
+            cv2.putText(debug_frame, f"Tried sizes: {pattern_sizes}", (10, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(debug_frame, "Recommendations:", (10, 130), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(debug_frame, "1. Make pattern larger (2-3 inches per square)", (10, 160), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(debug_frame, "2. Move pattern closer to camera", (10, 180), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(debug_frame, "3. Ensure high contrast (black/white)", (10, 200), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            
+            messagebox.showwarning("Detection Failed", 
+                                 f"Could not find chessboard pattern.\n\n"
+                                 f"Image size: {frame.shape[1]}x{frame.shape[0]}\n"
+                                 f"Tried pattern sizes: {pattern_sizes}\n\n"
+                                 f"Suggestions:\n"
+                                 f"1. Make the pattern larger (2-3 inches per square)\n"
+                                 f"2. Move the pattern closer to the camera\n"
+                                 f"3. Ensure high contrast between black and white squares\n"
+                                 f"4. Make sure the pattern is flat and well-lit")
+        
+        # Show preview with debug information
+        # Resize the debug frame to make the window smaller
+        height, width = debug_frame.shape[:2]
+        scale_factor = 0.6  # Make it 60% of original size
+        new_width = int(width * scale_factor)
+        new_height = int(height * scale_factor)
+        resized_debug = cv2.resize(debug_frame, (new_width, new_height))
+        
+        cv2.imshow('Calibration Preview', resized_debug)
+        cv2.waitKey(500)  # Show for 500ms
+
+    def calculate_calibration(self, cal_window):
+        """Calculate camera calibration from captured images"""
+        if len(self.calibration_images) < 10:
+            messagebox.showwarning("Warning", "Need at least 10 images for good calibration")
+            return
+            
+        try:
+            # Determine the pattern size from the first valid image
+            pattern_size = None
+            for _, corners in self.calibration_images:
+                if corners.shape[0] > 0:
+                    # Find the pattern size by trying to factor the corner count
+                    corner_count = corners.shape[0]
+                    for w in range(3, 12):  # Try widths from 3 to 11
+                        if corner_count % w == 0:
+                            h = corner_count // w
+                            if 3 <= h <= 12:  # Heights from 3 to 12
+                                pattern_size = (w, h)
+                                break
+                    if pattern_size:
+                        break
+            
+            if not pattern_size:
+                messagebox.showerror("Calibration Error", "Could not determine pattern size from captured images.")
+                return
+            
+            print(f"Detected pattern size: {pattern_size}")
+            
+            # Prepare object points for the detected pattern size
+            objp = np.zeros((pattern_size[0] * pattern_size[1], 3), np.float32)
+            objp[:,:2] = np.mgrid[0:pattern_size[0], 0:pattern_size[1]].T.reshape(-1, 2)
+            
+            # Arrays to store object points and image points
+            objpoints = []  # 3D points in real world space
+            imgpoints = []  # 2D points in image plane
+            
+            # Check each image for valid corner detection
+            valid_images = 0
+            expected_corners = pattern_size[0] * pattern_size[1]
+            
+            for i, (frame, corners) in enumerate(self.calibration_images):
+                # Check if we have the expected number of corners
+                if corners.shape[0] == expected_corners:
+                    objpoints.append(objp)
+                    imgpoints.append(corners)
+                    valid_images += 1
+                else:
+                    print(f"Image {i+1}: Expected {expected_corners} corners, found {corners.shape[0]}")
+            
+            if valid_images < 5:
+                messagebox.showerror("Calibration Error", 
+                                   f"Not enough valid images for calibration.\n"
+                                   f"Pattern size detected: {pattern_size}\n"
+                                   f"Valid images: {valid_images}/10\n"
+                                   f"Need at least 5 valid images.\n\n"
+                                   f"Try recapturing images with the pattern more clearly visible.")
+                return
+            
+            # Get image size from first image
+            img_size = self.calibration_images[0][0].shape[:2][::-1]
+            
+            print(f"Calibrating with {valid_images} valid images using pattern size {pattern_size}...")
+            
+            # Calculate camera matrix and distortion coefficients
+            ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+                objpoints, imgpoints, img_size, None, None)
+                
+            if ret:
+                self.camera_matrix = mtx
+                self.dist_coeffs = dist
+                
+                # Calculate reprojection error
+                mean_error = 0
+                for i in range(len(objpoints)):
+                    imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
+                    error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)/len(imgpoints2)
+                    mean_error += error
+                
+                mean_error = mean_error/len(objpoints)
+                
+                messagebox.showinfo("Calibration Success", 
+                                  f"Camera calibration completed successfully!\n\n"
+                                  f"Pattern size used: {pattern_size}\n"
+                                  f"Valid images used: {valid_images}/{len(self.calibration_images)}\n"
+                                  f"Mean reprojection error: {mean_error:.4f} pixels\n\n"
+                                  f"Lower error values indicate better calibration.")
+                self.update_lens_status()  # Update the status indicator
+                cal_window.destroy()
+            else:
+                messagebox.showerror("Calibration Error", "Failed to calculate calibration parameters.")
+                
+        except Exception as e:
+            print(f"Calibration error: {str(e)}")
+            messagebox.showerror("Calibration Error", 
+                               f"Error during calibration:\n{str(e)}\n\n"
+                               f"Try recapturing images with better lighting and pattern visibility.")
+
+    def save_calibration(self):
+        """Save camera calibration parameters"""
+        if self.camera_matrix is None or self.dist_coeffs is None:
+            messagebox.showerror("Error", "No calibration data available")
+            return
+            
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".npz",
+            filetypes=[("NumPy files", "*.npz")],
+            title="Save Calibration Data"
+        )
+        
+        if file_path:
+            np.savez(file_path, 
+                    camera_matrix=self.camera_matrix,
+                    dist_coeffs=self.dist_coeffs)
+            messagebox.showinfo("Success", "Calibration data saved successfully!")
+
+    def load_calibration(self):
+        """Load camera calibration parameters"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("NumPy files", "*.npz")],
+            title="Load Calibration Data"
+        )
+        
+        if file_path:
+            try:
+                data = np.load(file_path)
+                self.camera_matrix = data['camera_matrix']
+                self.dist_coeffs = data['dist_coeffs']
+                self.update_lens_status()  # Update the status indicator
+                messagebox.showinfo("Success", "Calibration data loaded successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load calibration data: {str(e)}")
+
+    def undistort_image(self, image):
+        """Apply lens distortion correction to an image"""
+        if self.camera_matrix is None or self.dist_coeffs is None:
+            return image
+            
+        return cv2.undistort(image, self.camera_matrix, self.dist_coeffs)
+
+    def reset_calibration(self):
+        """Reset camera calibration parameters"""
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self.calibration_images = []
+        self.update_lens_status()  # Update the status indicator
+        messagebox.showinfo("Calibration Reset", "Camera calibration parameters have been reset.")
+
+    def update_lens_status(self):
+        """Update the lens correction status label"""
+        if self.camera_matrix is not None and self.dist_coeffs is not None:
+            self.lens_status_label.config(text="Enabled", fg="green")
+        else:
+            self.lens_status_label.config(text="Disabled", fg="red")
