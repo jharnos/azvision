@@ -11,6 +11,8 @@ from queue import Queue, Empty
 import traceback
 from datetime import datetime
 import ezdxf
+import json
+import pickle
 
 from calibration.calibration_window import CalibrationWindow
 from utils.image_utils import color_based_edge_detection, simplify_contour, normalize_image_safe
@@ -1663,6 +1665,9 @@ class CNCVisionApp:
         file_menu.add_command(label="Auto-Load Latest Capture", command=self.load_latest_capture)
         file_menu.add_command(label="Generate Simplified DXF", command=self.process_image)
         file_menu.add_separator()
+        file_menu.add_command(label="Save Settings", command=self.save_settings)
+        file_menu.add_command(label="Load Settings", command=self.load_settings)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
         
         # Calibration menu
@@ -2109,3 +2114,171 @@ class CNCVisionApp:
             self.lens_status_label.config(text="Enabled", fg="green")
         else:
             self.lens_status_label.config(text="Disabled", fg="red")
+
+    def save_settings(self):
+        """Save all application settings to a file"""
+        settings = {
+            # Camera settings
+            'selected_camera': self.selected_camera.get(),
+            'selected_resolution': self.selected_resolution.get(),
+            'auto_exposure': self.auto_exposure.get(),
+            'exposure': self.exposure_var.get(),
+            'brightness': self.brightness_var.get(),
+            'contrast': self.contrast_var.get(),
+            
+            # Edge detection settings
+            'inches_per_pixel': self.inches_per_pixel.get(),
+            'canny_low': self.canny_low.get(),
+            'canny_high': self.canny_high.get(),
+            'edge_scale': self.edge_scale.get(),
+            'edge_color': self.edge_color,
+            
+            # Color detection settings
+            'color_mode': self.color_mode.get(),
+            'target_color': self.target_color.tolist() if self.target_color is not None else None,
+            'color_tolerance_h': self.color_tolerance_h.get(),
+            'color_tolerance_s': self.color_tolerance_s.get(),
+            'color_tolerance_v': self.color_tolerance_v.get(),
+            'color_sample_radius': self.color_sample_radius.get(),
+            
+            # DXF settings
+            'dxf_rotation': self.dxf_rotation.get(),
+            'use_reference_point': self.use_reference_point.get(),
+            'reference_point': self.reference_point,
+            'reference_point_resolution': self.reference_point_resolution,
+            'reference_table_x': self.reference_table_x.get(),
+            'reference_table_y': self.reference_table_y.get(),
+            'add_table_boundary': self.add_table_boundary.get(),
+            'table_width': self.table_width.get(),
+            'table_height': self.table_height.get(),
+            
+            # Background subtraction
+            'use_background_subtraction': self.use_background_subtraction.get(),
+            
+            # Calibration settings
+            'camera_matrix': self.camera_matrix.tolist() if self.camera_matrix is not None else None,
+            'dist_coeffs': self.dist_coeffs.tolist() if self.dist_coeffs is not None else None,
+            
+            # Calibration points
+            'calibration_points': self.calibration_points,
+            'known_distance': self.known_distance.get()
+        }
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".cncsettings",
+            filetypes=[("CNC Vision Settings", "*.cncsettings"), ("All files", "*.*")],
+            title="Save Settings"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'wb') as f:
+                    pickle.dump(settings, f)
+                messagebox.showinfo("Success", f"Settings saved to: {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+
+    def load_settings(self):
+        """Load all application settings from a file"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("CNC Vision Settings", "*.cncsettings"), ("All files", "*.*")],
+            title="Load Settings"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    settings = pickle.load(f)
+                
+                # Load camera settings
+                if 'selected_camera' in settings:
+                    self.selected_camera.set(settings['selected_camera'])
+                if 'selected_resolution' in settings:
+                    self.selected_resolution.set(settings['selected_resolution'])
+                if 'auto_exposure' in settings:
+                    self.auto_exposure.set(settings['auto_exposure'])
+                if 'exposure' in settings:
+                    self.exposure_var.set(settings['exposure'])
+                if 'brightness' in settings:
+                    self.brightness_var.set(settings['brightness'])
+                if 'contrast' in settings:
+                    self.contrast_var.set(settings['contrast'])
+                
+                # Load edge detection settings
+                if 'inches_per_pixel' in settings:
+                    self.inches_per_pixel.set(settings['inches_per_pixel'])
+                if 'canny_low' in settings:
+                    self.canny_low.set(settings['canny_low'])
+                if 'canny_high' in settings:
+                    self.canny_high.set(settings['canny_high'])
+                if 'edge_scale' in settings:
+                    self.edge_scale.set(settings['edge_scale'])
+                if 'edge_color' in settings:
+                    self.edge_color = settings['edge_color']
+                    # Update edge color preview
+                    hex_color = '#{:02x}{:02x}{:02x}'.format(self.edge_color[2], self.edge_color[1], self.edge_color[0])
+                    self.edge_color_preview.configure(bg=hex_color)
+                
+                # Load color detection settings
+                if 'color_mode' in settings:
+                    self.color_mode.set(settings['color_mode'])
+                if 'target_color' in settings and settings['target_color'] is not None:
+                    self.target_color = np.array(settings['target_color'])
+                    # Update color preview
+                    hex_color = '#{:02x}{:02x}{:02x}'.format(self.target_color[2], self.target_color[1], self.target_color[0])
+                    self.color_preview.configure(bg=hex_color)
+                if 'color_tolerance_h' in settings:
+                    self.color_tolerance_h.set(settings['color_tolerance_h'])
+                if 'color_tolerance_s' in settings:
+                    self.color_tolerance_s.set(settings['color_tolerance_s'])
+                if 'color_tolerance_v' in settings:
+                    self.color_tolerance_v.set(settings['color_tolerance_v'])
+                if 'color_sample_radius' in settings:
+                    self.color_sample_radius.set(settings['color_sample_radius'])
+                
+                # Load DXF settings
+                if 'dxf_rotation' in settings:
+                    self.dxf_rotation.set(settings['dxf_rotation'])
+                if 'use_reference_point' in settings:
+                    self.use_reference_point.set(settings['use_reference_point'])
+                if 'reference_point' in settings:
+                    self.reference_point = settings['reference_point']
+                if 'reference_point_resolution' in settings:
+                    self.reference_point_resolution = settings['reference_point_resolution']
+                if 'reference_table_x' in settings:
+                    self.reference_table_x.set(settings['reference_table_x'])
+                if 'reference_table_y' in settings:
+                    self.reference_table_y.set(settings['reference_table_y'])
+                if 'add_table_boundary' in settings:
+                    self.add_table_boundary.set(settings['add_table_boundary'])
+                if 'table_width' in settings:
+                    self.table_width.set(settings['table_width'])
+                if 'table_height' in settings:
+                    self.table_height.set(settings['table_height'])
+                
+                # Load background subtraction
+                if 'use_background_subtraction' in settings:
+                    self.use_background_subtraction.set(settings['use_background_subtraction'])
+                
+                # Load calibration settings
+                if 'camera_matrix' in settings and settings['camera_matrix'] is not None:
+                    self.camera_matrix = np.array(settings['camera_matrix'])
+                if 'dist_coeffs' in settings and settings['dist_coeffs'] is not None:
+                    self.dist_coeffs = np.array(settings['dist_coeffs'])
+                self.update_lens_status()
+                
+                # Load calibration points
+                if 'calibration_points' in settings:
+                    self.calibration_points = settings['calibration_points']
+                if 'known_distance' in settings:
+                    self.known_distance.set(settings['known_distance'])
+                
+                # Refresh preview to show updated settings
+                self.refresh_preview()
+                
+                messagebox.showinfo("Success", f"Settings loaded from: {file_path}")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
+                print(f"Load settings error: {str(e)}")
+                traceback.print_exc()
